@@ -75,7 +75,15 @@ export class Memo {
       const a = b.dataset.act;
       if (a === 'undo') this.undo();
       if (a === 'redo') this.doRedo();
-      if (a === 'clear') { if (confirm('メモを全部消しますか？')) this.clear(); }
+      if (a === 'clear') {
+        // ダイアログを出さず、ボタンを2回押すと全消去
+        if (b.classList.contains('armed')) { this.clear(); b.classList.remove('armed'); b.textContent = '🗑'; clearTimeout(this._armT); }
+        else {
+          b.classList.add('armed'); b.textContent = 'もう一度で全消去';
+          clearTimeout(this._armT);
+          this._armT = setTimeout(() => { b.classList.remove('armed'); b.textContent = '🗑'; }, 2500);
+        }
+      }
       if (a === 'save') this.save();
       if (a === 'close') this.toggle(false);
     });
@@ -165,5 +173,6 @@ export class Memo {
     this.root.classList.toggle('show', this.open);
     document.body.classList.toggle('memo-open', this.open);
     if (this.sound) this.sound.play('click');
+    if (this.onToggle) this.onToggle(this.open);
   }
 }

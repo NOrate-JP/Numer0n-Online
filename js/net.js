@@ -2,6 +2,7 @@
 //  通信層：LocalStore（CPU戦） / FirebaseNet（オンライン）
 // =============================================================
 import { firebaseConfig } from './firebase-config.js';
+import { MAX_MEMBERS } from './rules.js';
 
 const clean = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
 
@@ -29,8 +30,17 @@ export class LocalStore {
     setTimeout(() => { for (const cb of this.subs) cb(snap); }, 0);
     return true;
   }
-  saveSecret(uid, d) { this._secrets[uid] = clean(d); }
+  saveSecret(uid, d) {
+    this._secrets[uid] = clean(d);
+    for (const w of this._secretWatch || []) if (w.uid === uid) setTimeout(() => w.cb(this._secrets[uid]), 0);
+  }
   async loadSecret(uid) { return this._secrets[uid] || null; }
+  watchSecret(uid, cb) {
+    this._secretWatch = this._secretWatch || [];
+    const w = { uid, cb }; this._secretWatch.push(w);
+    setTimeout(() => cb(this._secrets[uid] || null), 0);
+    return () => { this._secretWatch = this._secretWatch.filter((x) => x !== w); };
+  }
 }
 
 // -------------------------------------------------------------
@@ -77,7 +87,7 @@ export class FirebaseNet {
     }
     await set(this.ref(`rooms/${code}/meta`), {
       host: this.uid, createdAt: Date.now(), status: 'lobby', settings: clean(settings),
-      players: { [this.uid]: { name, seat: 0, online: true, joinedAt: Date.now() } },
+      players: { [this.uid]: { name, seat: 0, role: 'player', online: true, joinedAt: Date.now() } },
     });
     return code;
   }
@@ -95,10 +105,14 @@ export class FirebaseNet {
         return meta;
       }
       const ids = Object.keys(meta.players);
-      if (ids.length >= 2) { reason = 'full'; return; }
-      if (meta.status !== 'lobby') { reason = 'playing'; return; }
-      const taken = ids.map((k) => meta.players[k].seat);
-      meta.players[this.uid] = { name, seat: taken.includes(0) ? 1 : 0, online: true, joinedAt: Date.now() };
+      if (ids.length >= MAX_MEMBERS) { reason = 'full'; return; }
+      const playersNow = ids.filter((k) => (meta.players[k].role || 'player') === 'player');
+      const taken = playersNow.map((k) => meta.players[k].seat);
+      if (playersNow.length < 2 && meta.status === 'lobby') {
+        meta.players[this.uid] = { name, seat: taken.includes(0) ? 1 : 0, role: 'player', online: true, joinedAt: Date.now() };
+      } else {
+        meta.players[this.uid] = { name, seat: -1, role: 'spectator', online: true, joinedAt: Date.now() };
+      }
       return meta;
     });
     if (!res.committed || !res.snapshot.exists() || !res.snapshot.val().players || !res.snapshot.val().players[this.uid]) {
@@ -137,6 +151,23 @@ export class FirebaseNet {
       await set(this.ref(`secrets/${code}/${this.uid}`), null);
     } catch (e) { console.warn(e); }
     this.code = null;
+  }
+
+  /** 役割を変更（対戦 ⇔ 観戦）。対戦は最大2人 */
+  async setRole(uid, role) {
+    return this.updateMeta((m) => {
+      const p = m.players && m.players[uid];
+      if (!p || m.status !== 'lobby') return m;
+      if (role === 'player') {
+        const ps = Object.entries(m.players).filter(([k, v]) => k !== uid && (v.role || 'player') === 'player');
+        if (ps.length >= 2) return m;
+        p.role = 'player';
+        p.seat = ps.some(([, v]) => v.seat === 0) ? 1 : 0;
+      } else {
+        p.role = 'spectator'; p.seat = -1;
+      }
+      return m;
+    });
   }
 
   async updateMeta(fn) {
@@ -183,6 +214,12 @@ export class FirebaseStore {
   }
   saveSecret(uid, d) {
     this.net.m.set(this.net.ref(`secrets/${this.code}/${uid}`), clean(d)).catch((e) => console.warn(e));
+  }
+  watchSecret(uid, cb) {
+    return this.net.m.onValue(this.net.ref(`secrets/${this.code}/${uid}`), (snap) => cb(snap.val()), () => cb(null));
+  }
+  watchSecret(uid, cb) {
+    return this.net.m.onValue(this.net.ref(`secrets/${this.code}/${uid}`), (snap) => cb(snap.val()), () => cb(null));
   }
   async loadSecret(uid) {
     const snap = await this.net.m.get(this.net.ref(`secrets/${this.code}/${uid}`));

@@ -5,7 +5,7 @@
 
 export const SOUND_NAMES = [
   'click', 'hover', 'key', 'title', 'start', 'draw', 'turn', 'call', 'drum', 'eat', 'bite', 'zero',
-  'numer0n', 'item_attack', 'item_defense', 'info', 'shuffle', 'tick', 'timeup', 'win', 'lose', 'draw_game', 'ready',
+  'numer0n', 'item_press', 'item_attack', 'item_defense', 'info', 'shuffle', 'tick', 'timeup', 'win', 'lose', 'draw_game', 'ready',
   'bgm_title', 'bgm_game', 'bgm_result',
 ];
 
@@ -185,6 +185,11 @@ export class Sound {
     this.noise(1.0, { gain: 0.15, freq: 600, slide: 9000, q: 4, verb: 0.6 });
     this.chord([523.3 * k, 784 * k, 1046.5 * k], 1.2, { type: 'triangle', gain: 0.06, at: 0.35, verb: 0.8 });
   }
+  s_item_press() {
+    this.tone(880, 0.12, { type: 'square', gain: 0.1, filter: { freq: 3000 }, verb: 0.2 });
+    this.tone(1320, 0.25, { type: 'square', gain: 0.09, at: 0.09, filter: { freq: 3500 }, verb: 0.4 });
+    this.noise(0.3, { gain: 0.2, freq: 1500, slide: 7000, q: 2, verb: 0.3 });
+  }
   s_info() { [1318.5, 1568, 2093].forEach((f, i) => this.tone(f, 0.15, { type: 'sine', gain: 0.12, at: i * 0.07, verb: 0.4 })); }
   s_shuffle() { for (let i = 0; i < 7; i++) this.noise(0.06, { gain: 0.22, at: i * 0.08, freq: 3000 + Math.random() * 2000, type: 'highpass', verb: 0.1 }); }
   s_tick(o) { this.tone(o.last ? 1500 : 1000, 0.05, { type: 'square', gain: 0.07, filter: { freq: 3000 }, verb: 0 }); }
@@ -204,6 +209,20 @@ export class Sound {
     this.tone(N(-12), 1.6, { type: 'sine', gain: 0.2, at: 1.1, verb: 0.4 });
   }
   s_draw_game() { this.chord([392, 523.3, 587.3], 1.2, { type: 'triangle', gain: 0.08, verb: 0.6 }); }
+
+  /** 動画の音をSE音量・ミュートに連動させる */
+  attachMedia(el) {
+    if (!this.ctx || el._snd) return;
+    try {
+      const src = this.ctx.createMediaElementSource(el);
+      src.connect(this.seBus);
+      el._snd = true;
+    } catch (e) { console.warn('media route failed', e); }
+  }
+  duck(on) {
+    if (!this.ctx) return;
+    this.bgmBus.gain.setTargetAtTime(on ? this.vol.bgm * 0.15 : this.vol.bgm, this.ctx.currentTime, 0.25);
+  }
 
   // ---------------- BGM ----------------
   bgm(name, force) {

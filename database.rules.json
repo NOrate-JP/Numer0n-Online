@@ -9,7 +9,7 @@
     "secrets": {
       "$code": {
         "$uid": {
-          ".read": "auth != null && auth.uid === $uid",
+          ".read": "auth != null && (auth.uid === $uid || root.child('rooms').child($code).child('meta/players').child(auth.uid).child('role').val() === 'spectator')",
           ".write": "auth != null && auth.uid === $uid"
         }
       }

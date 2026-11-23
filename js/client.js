@@ -66,8 +66,14 @@ export class Player {
 
   _tick() {
     const s = this.state;
-    if (!s || s.phase !== 'play' || s.pending || !s.turnDeadline) return;
+    if (!s || s.phase !== 'play') return;
     const now = this.now();
+    // 宣言しっぱなしの放置を解除
+    if (s.pending && s.pending.type === 'declare' && now > s.pending.until + (s.pending.by === this.uid ? 0 : 3000)) {
+      this.store.update((cur) => R.actCancelDeclare(cur, this.uid, this.now(), true));
+      return;
+    }
+    if (s.pending || !s.turnDeadline) return;
     // 手番側は即座に、相手側は少し待ってからタイムアウト処理（切断対策）
     const grace = s.turn === this.uid ? 0 : 4000;
     if (now > s.turnDeadline + grace) {
@@ -126,6 +132,15 @@ export class Player {
     return this.store.update((cur) => R.cancelSetup(cur, this.uid));
   }
 
+  /** アイテムボタンを押す */
+  async declare() {
+    return this.store.update((cur) => R.actDeclare(cur, this.uid, this.now()));
+  }
+
+  async cancelDeclare() {
+    return this.store.update((cur) => R.actCancelDeclare(cur, this.uid, this.now()));
+  }
+
   async call(num) {
     return this.store.update((cur) => R.actCall(cur, this.uid, num, this.now()));
   }
@@ -159,4 +174,50 @@ export class Player {
   async resign() {
     return this.store.update((cur) => R.actResign(cur, this.uid, this.now()));
   }
+}
+
+// =============================================================
+//  Watcher：観戦者。指定した視点のプレイヤーの番号を（許可された範囲で）読む
+// =============================================================
+export class Watcher {
+  constructor(store, uid, opts = {}) {
+    this.store = store;
+    this.uid = uid;
+    this.isWatcher = true;
+    this.onState = opts.onState || null;
+    this.state = null;
+    this.view = null;
+    this.viewSecrets = {};
+    this._unsubSecret = null;
+    this._unsub = store.subscribe((s) => {
+      this.state = s ? R.norm(JSON.parse(JSON.stringify(s))) : null;
+      if (this.state && this.state.specView !== this.view) this._watch(this.state.specView);
+      if (this.onState) this.onState(this.state);
+    });
+  }
+  _watch(view) {
+    this.view = view;
+    if (this._unsubSecret) this._unsubSecret();
+    this.viewSecrets = {};
+    if (this.store.watchSecret) {
+      this._unsubSecret = this.store.watchSecret(view, (d) => {
+        this.viewSecrets = (d && d.vers) ? Object.assign({}, d.vers) : {};
+        if (this.onState && this.state) this.onState(this.state);
+      });
+    }
+  }
+  destroy() { if (this._unsub) this._unsub(); if (this._unsubSecret) this._unsubSecret(); }
+  now() { return this.store.now(); }
+  get secret() {
+    const s = this.state; if (!s || !this.view) return null;
+    const v = (s.secretVer && s.secretVer[this.view]) || 0;
+    if (this.viewSecrets[v] != null) return this.viewSecrets[v];
+    const keys = Object.keys(this.viewSecrets).map(Number).sort((a, b) => b - a);
+    return keys.length ? this.viewSecrets[keys[0]] : null;
+  }
+  async restoreSecret() {}
+  async declare() { return false; } async cancelDeclare() { return false; }
+  async call() { return false; } async attack() { return false; } async defend() { return false; }
+  async chooseDouble() { return false; } async next() { return false; } async resign() { return false; }
+  async setup() { return false; } async unready() { return false; }
 }

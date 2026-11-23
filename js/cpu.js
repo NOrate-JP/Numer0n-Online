@@ -215,7 +215,8 @@ export class CpuAgent {
         }
         if (best) { use = best[0]; args = best[1]; }
       }
-      if (use) {
+      if (use && await this.player.declare()) {
+        await sleep(1100 + Math.random() * 800);
         await this.player.attack(use, args);
         this.busy = false;
         return; // 結果を待ってから再度行動
@@ -256,6 +257,8 @@ export class CpuAgent {
       }
     }
     if (!plan) { this.busy = false; return; }
+    if (!(await this.player.declare())) { this.busy = false; return; }
+    await sleep(1000 + Math.random() * 700);
     if (plan.key === 'shuffle') {
       const ps = perms(sec).filter((p) => p !== sec);
       const ns = Math.random() < 0.1 ? sec : rnd(ps);

@@ -38,11 +38,17 @@ assets/               画像・音（下記）
 | `assets/items/double.png` `highlow.png` `target.png` `slash.png` `time.png` `shuffle.png` `change.png` | アイテムアイコン（正方形・透過PNG推奨） |
 | `assets/memo_bg.png` | メモの背景（2560×1440） |
 | `assets/logo.png` | タイトルロゴ（任意・透過PNG。スタジオのモニターにも表示） |
+| `assets/videos/double.mp4` など | アイテム映像（任意・音声込みOK・最大15秒）。ファイル名はアイテム画像と同じ（double / highlow / target / slash / time / shuffle / change）。H.264のmp4推奨、1本10MB程度まで |
 | `assets/sounds/*.mp3` | 効果音の差し替え（任意。下の名前で置くと合成音の代わりに鳴る） |
 
 効果音の名前：`click` `hover` `key` `title` `start` `draw` `turn` `call` `drum` `eat` `bite` `zero` `numer0n` `item_attack` `item_defense` `info` `shuffle` `tick` `timeup` `win` `lose` `draw_game` `ready`
 BGM（ループ）：`bgm_title` `bgm_game` `bgm_result`
 
 ## 操作
-- 数字キー：入力 / Enter：コール / Backspace：1文字消す / M：メモ
+- 数字キー：入力 / Enter：コール / Backspace：1文字消す / I：ITEMボタン / M：メモ
+- 画質（低/中/高）は右上の♪ボタンのメニューで変更（重い場合は「低」）
+
+## 観戦
+ルームは最大12人。対戦は2人、残りは観戦者。ロビーで「観戦へ／対戦へ」を切り替え（ホストは全員分を変更可）。観戦者は全員、マッチ開始時にランダムで選ばれた片方のプレイヤーの視点で見ます。
+※ 観戦者は視点プレイヤーの番号を読めるよう、`database.rules.json` を更新してください。
 - メモ：P=ペン、E=消しゴム、Ctrl+Z / Ctrl+Y、ペンタブの筆圧対応、PNG保存

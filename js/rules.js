@@ -31,11 +31,24 @@ export const DEFAULT_SETTINGS = {
   timeItemSec: 60,      // TIMEの延長秒数
   winsNeeded: 1,        // 何ゲーム先取
   finalChance: false,   // 先攻が当てたら後攻に最後の1ターン（同時なら引き分け）
+  itemMovie: true,      // アイテム使用時にモニターで映像を流す
+  videoMs: {},          // 各アイテム映像の長さ(ms)。ホストが開始時に書き込む
 };
 
 export const ORDER_MS = 6800;       // 先攻決め演出の時間
 export const REVEAL_MS = 4200;      // コール判定演出の最低時間
 export const INFO_MS = 3000;        // アイテム結果演出の時間
+export const ITEM_FX_MS = 2800;     // 映像なしのアイテム演出時間
+export const DECLARE_MS = 25000;    // アイテムボタンを押してから宣言するまでの制限
+export const MAX_MEMBERS = 12;      // ルームの最大人数（観戦者含む）
+const INFO_ITEMS = ['highlow', 'slash', 'target', 'double'];
+
+/** アイテム演出（映像）の長さ */
+export function fxMs(s, key) {
+  const st = s.settings;
+  const v = st.itemMovie && st.videoMs && st.videoMs[key];
+  return v ? Math.min(v, 15000) + 1600 : ITEM_FX_MS;
+}
 
 export const hlOf = (d) => (Number(d) >= 5 ? 'H' : 'L');
 
@@ -94,6 +107,10 @@ export function sanitizeSettings(raw) {
   s.winsNeeded = Math.max(1, Math.min(5, +s.winsNeeded || 1));
   s.finalChance = !!s.finalChance;
   s.noHLSlash = !!s.noHLSlash;
+  s.itemMovie = s.itemMovie !== false;
+  const vm = {};
+  for (const k of ITEM_ORDER) { const v = Number(s.videoMs && s.videoMs[k]); if (v > 0) vm[k] = Math.min(v, 15000); }
+  s.videoMs = vm;
   return s;
 }
 
@@ -149,7 +166,46 @@ export function canAct(s, uid, now) {
 }
 
 export function canDefend(s, uid) {
-  return !!s && s.phase === 'play' && s.turn !== uid && !s.pending && !s.defenseLocked && !s.defenseUsed;
+  return !!s && s.phase === 'play' && s.seats.includes(uid) && s.turn !== uid && !s.pending && !s.defenseLocked && !s.defenseUsed;
+}
+
+export function hasUnused(s, uid, kind) {
+  return Object.entries((s.items && s.items[uid]) || {}).some(([k, v]) => v === 'unused' && ITEM_DEFS[k] && ITEM_DEFS[k].kind === kind);
+}
+
+/** アイテムボタンを押せるか（'attack' | 'defense' | null） */
+export function declareSide(s, uid, now) {
+  if (!s || s.phase !== 'play') return null;
+  if (canAct(s, uid, now) && !s.attackUsed && !s.itemsLocked && hasUnused(s, uid, 'attack')) return 'attack';
+  if (canDefend(s, uid) && hasUnused(s, uid, 'defense')) return 'defense';
+  return null;
+}
+
+/** アイテムボタンを押す（＝相手の行動をロックしてアイテムを宣言する時間に入る） */
+export function actDeclare(s, uid, now) {
+  s = norm(s);
+  const side = declareSide(s, uid, now);
+  if (!side) return undefined;
+  s.pending = { id: nextId(s), type: 'declare', by: uid, responder: uid, side, at: now, until: now + DECLARE_MS };
+  return s;
+}
+
+function takeDeclare(s, uid, side, now) {
+  const p = s.pending;
+  if (!p || p.type !== 'declare' || p.by !== uid || p.side !== side) return false;
+  s.pending = null;
+  // 防御側の宣言中は攻撃側の時間を止めていた扱い
+  if (side === 'defense' && s.turnDeadline) s.turnDeadline += Math.max(0, now - p.at);
+  return true;
+}
+
+export function actCancelDeclare(s, uid, now, force) {
+  s = norm(s);
+  const p = s.pending;
+  if (!p || p.type !== 'declare') return undefined;
+  if (p.by !== uid && !(force && now > p.until)) return undefined;
+  takeDeclare(s, p.by, p.side, now);
+  return s;
 }
 
 // -------------------------------------------------------------
@@ -160,6 +216,7 @@ export function newMatch(seats, settings, now) {
   const s = {
     v: 1, seats: seats.slice(0, 2), settings: sanitizeSettings(settings),
     phase: 'setup', game: 1, seq: 0, wins: {}, setup: {}, log: [], createdAt: now,
+    specView: seats[Math.floor(Math.random() * 2)],   // 観戦者が見る視点（マッチ中固定）
   };
   return norm(s);
 }
@@ -262,12 +319,13 @@ export function actAttack(s, uid, key, args, now) {
   s = norm(s);
   const def = ITEM_DEFS[key];
   if (!def || def.kind !== 'attack') return undefined;
-  if (!canAct(s, uid, now) || s.attackUsed || s.itemsLocked) return undefined;
   if (s.items[uid][key] !== 'unused') return undefined;
   if (key === 'target') {
     const d = Number(args && args.digit);
     if (!(d >= 0 && d <= 9)) return undefined;
   }
+  if (!takeDeclare(s, uid, 'attack', now)) return undefined;
+  if (!canAct(s, uid, now) || s.attackUsed || s.itemsLocked) return undefined;
   s.items[uid][key] = 'used';
   s.attackUsed = true;
   s.defenseLocked = true;
@@ -276,10 +334,12 @@ export function actAttack(s, uid, key, args, now) {
   if (key === 'target') e.digit = Number(args.digit);
   if (key === 'time') e.sec = s.settings.timeItemSec;
   pushLog(s, e, now);
+  const extra = fxMs(s, key) + (INFO_ITEMS.includes(key) ? INFO_MS : 0);
+  s.cooldownUntil = Math.max(s.cooldownUntil, now + extra);
+  if (s.turnDeadline) s.turnDeadline += extra;
   switch (key) {
     case 'time':
       if (s.turnDeadline) s.turnDeadline += s.settings.timeItemSec * 1000;
-      s.cooldownUntil = Math.max(s.cooldownUntil, now + 2200);
       break;
     case 'double':
       s.pending = { id: nextId(s), type: 'double_choose', by: uid, responder: opp, at: now };
@@ -300,8 +360,13 @@ export function actDefense(s, uid, key, info, now) {
   s = norm(s);
   const def = ITEM_DEFS[key];
   if (!def || def.kind !== 'defense') return undefined;
-  if (!canDefend(s, uid)) return undefined;
   if (s.items[uid][key] !== 'unused') return undefined;
+  if (key === 'change') {
+    const pos = Number(info && info.pos);
+    if (!(pos >= 0 && pos < s.settings.digits) || !info || (info.hl !== 'H' && info.hl !== 'L')) return undefined;
+  }
+  if (!takeDeclare(s, uid, 'defense', now)) return undefined;
+  if (!canDefend(s, uid)) return undefined;
   const e = { type: 'item', by: uid, item: key };
   if (key === 'change') {
     const pos = Number(info && info.pos);
@@ -317,7 +382,7 @@ export function actDefense(s, uid, key, info, now) {
   s.secretVer[uid] = (s.secretVer[uid] || 0) + 1;
   pushLog(s, e, now);
   // 演出時間ぶん攻撃側の行動を待たせる
-  s.cooldownUntil = Math.max(s.cooldownUntil, now + 2600);
+  s.cooldownUntil = Math.max(s.cooldownUntil, now + fxMs(s, key) + 400);
   if (s.turnDeadline) s.turnDeadline = Math.max(s.turnDeadline, s.cooldownUntil + 5000);
   return s;
 }
@@ -326,7 +391,7 @@ export function actDefense(s, uid, key, info, now) {
 export function resolvePending(s, uid, pid, result, now) {
   s = norm(s);
   const p = s.pending;
-  if (!p || p.id !== pid || p.responder !== uid) return undefined;
+  if (!p || p.id !== pid || p.responder !== uid || p.type === 'declare') return undefined;
   const D = s.settings.digits;
   if (s.turnDeadline && p.type !== 'call') s.turnDeadline += Math.max(0, now - (p.at || now)) + INFO_MS;
 

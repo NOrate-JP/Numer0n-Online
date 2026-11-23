@@ -490,3 +490,100 @@ body[data-screen="scr-game"] #memo { top: 96px; left: 316px; right: 316px; botto
   body[data-screen="scr-game"] #memo { inset: 70px 6px 6px 6px; }
   .menu-top { right: 10px; top: 56px; }
 }
+
+/* =============================================================
+   v2 追加・上書き
+   ============================================================= */
+/* スクロールバーを見せない（スクロール自体は可能） */
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.btn { white-space: nowrap; }
+.btn.tiny { font-size: 11px; padding: 0.4em 0.8em; clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+
+/* オンライン参加欄 */
+.join-row input { min-width: 0; width: 100%; }
+.join-row .btn { flex: none; }
+
+/* ロビー */
+#lobby { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+.lobby-left, .lobby-right { min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.room-code small { line-height: 1.2; }
+.room-code b { font-size: 30px; min-width: 0; overflow: hidden; }
+.pslot { min-width: 0; }
+.pname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.specs { background: rgba(20, 28, 70, 0.35); padding: 8px 10px; }
+.specs-head { font-size: 12px; color: var(--dim); margin-bottom: 6px; }
+.specs-head b { color: #fff; font-family: var(--en); }
+.spec-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.spec { display: flex; align-items: center; gap: 6px; font-size: 13px; background: rgba(255, 255, 255, 0.06); padding: 4px 8px; }
+.spec.me { box-shadow: inset 0 0 0 1px #ffd04a; }
+.spec.off { opacity: 0.45; }
+.spec.none { color: var(--dim); }
+.spec em { font-style: normal; font-family: var(--en); font-size: 9px; background: #3a5cff; padding: 1px 4px; }
+.set-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.set-grid label { min-width: 0; white-space: nowrap; }
+.set-grid select { min-width: 0; max-width: 60%; }
+.pool { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pool-item { min-width: 0; overflow: hidden; }
+.chk small.vids { color: var(--dim); font-size: 11px; margin-left: 4px; }
+
+/* 観戦者用 */
+.spec-setup { max-width: 640px; margin: 40px auto 0; text-align: center; }
+.spec-ready { display: flex; justify-content: center; gap: 20px; margin: 18px 0; }
+.spec-ready > div { padding: 14px 26px; background: rgba(20, 28, 70, 0.6); display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
+.spec-ready span { font-family: var(--en); color: var(--dim); }
+.spec-ready .ok span { color: #6dff9a; }
+.spec-bar { display: none; position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); align-items: center; gap: 14px; padding: 12px 30px; background: var(--panel); border: 1px solid var(--line); }
+.spec-bar .eye { font-size: 30px; }
+.spec-bar b { display: block; font-family: var(--en); letter-spacing: 0.1em; }
+.spec-bar small { color: var(--dim); }
+body.spectator .spec-bar { display: flex; }
+body.spectator .input-area, body.spectator #h-resign { display: none; }
+
+/* ITEMボタン */
+.item-btn { min-width: 110px; display: flex; flex-direction: column; align-items: center; line-height: 1.1; background: linear-gradient(180deg, #4a4f6a, #22263a); }
+.item-btn b { font-size: 18px; }
+.item-btn small { font-family: var(--jp); font-size: 10px; margin: 0; opacity: 0.9; min-height: 1em; }
+.item-btn.attack { background: linear-gradient(180deg, #f0a020, #a05a00); box-shadow: inset 0 0 0 2px #ffe0a0, inset 0 12px 18px rgba(255, 255, 255, 0.25); animation: callPulse 1.2s infinite; }
+.item-btn.defense { background: linear-gradient(180deg, #2fbf6a, #106a34); box-shadow: inset 0 0 0 2px #b0ffd0, inset 0 12px 18px rgba(255, 255, 255, 0.25); animation: callPulse 0.9s infinite; }
+.my-item { cursor: default; }
+.my-item.used .item { filter: grayscale(1) brightness(0.45); }
+
+/* アイテム宣言モーダル */
+#modal.decl .modal-box { width: min(760px, 94vw); border-color: #ffd04a; box-shadow: 0 0 50px rgba(255, 200, 60, 0.5); }
+.decl-title { font-family: var(--en); font-size: 26px; letter-spacing: 0.15em; }
+.decl-title.attack { color: #ffc060; } .decl-title.defense { color: #6dffa0; }
+.decl-title small { font-family: var(--jp); font-size: 13px; letter-spacing: 0; color: var(--dim); margin-left: 8px; }
+.decl-lead { font-weight: 800; }
+.decl-timer { height: 4px; background: rgba(255, 255, 255, 0.1); margin: 6px 0 12px; }
+.decl-timer i { display: block; height: 100%; width: 100%; background: #ffd04a; transition: width 0.25s linear; }
+.decl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.decl-item { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; gap: 2px 10px; align-items: center; text-align: left; padding: 10px; background: rgba(20, 26, 66, 0.8); border: 2px solid var(--ic); color: #fff; cursor: pointer; transition: 0.12s; }
+.decl-item:hover { background: color-mix(in srgb, var(--ic) 35%, #10143a); transform: translateY(-2px); box-shadow: 0 0 20px var(--ic); }
+.decl-item .item { grid-row: span 2; --is: 56px; }
+.decl-item b { font-family: var(--en); font-size: 16px; }
+.decl-item small { font-size: 11px; color: #c8cff0; line-height: 1.4; }
+
+/* ITEMボタン押下の演出 */
+.presscut { align-items: start; padding-top: 22vh; }
+.press { display: flex; align-items: baseline; gap: 16px; padding: 8px 40px; background: linear-gradient(90deg, transparent, rgba(255, 200, 60, 0.85) 15%, rgba(255, 140, 0, 0.85) 85%, transparent); animation: bandIn 0.25s ease; }
+.press b { font-family: var(--en); font-weight: 900; font-size: 44px; letter-spacing: 0.2em; color: #fff; text-shadow: 0 0 16px #ff8a00; }
+.press span { font-weight: 800; font-size: 18px; }
+
+/* モニター注目中はHUDを暗く */
+#hud > * { transition: opacity 0.4s; }
+body.monitor-focus #hud > * { opacity: 0.12; }
+body.monitor-focus #hud > .hud-top { opacity: 0.5; }
+.moviecut video { width: min(80vw, 1100px); box-shadow: 0 0 60px rgba(100, 130, 255, 0.6); }
+
+/* 画質ボタン */
+.q-row { display: flex; justify-content: space-between; align-items: center; }
+#quality { display: flex; gap: 4px; }
+#quality button { width: 34px; height: 26px; border: 1px solid var(--line); background: rgba(20, 28, 70, 0.8); color: #fff; cursor: pointer; font-size: 12px; }
+#quality button.on { background: var(--neon); }
+
+/* メモ：全消去の確認状態 */
+.mt-btn.armed { width: auto; padding: 0 10px; font-size: 12px; background: #c0203a; box-shadow: 0 0 10px #ff4060; }
+
+/* システムバーのメモは準備画面のみ */
+body:not([data-screen="scr-setup"]) #sys-memo { display: none; }
