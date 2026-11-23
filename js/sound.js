@@ -4,10 +4,14 @@
 // =============================================================
 
 export const SOUND_NAMES = [
-  'click', 'hover', 'key', 'title', 'start', 'draw', 'turn', 'call', 'drum', 'eat', 'bite', 'zero',
-  'numer0n', 'item_press', 'item_attack', 'item_defense', 'info', 'shuffle', 'tick', 'timeup', 'win', 'lose', 'draw_game', 'ready',
-  'bgm_title', 'bgm_game', 'bgm_result',
+  // 試合中に鳴る音（ユーザー素材で差し替え想定）
+  'bgm_start', 'bgm_game', 'item_press', 'call', 'judge', 'item_judge', 'fanfare',
+  // 試合外（メニュー等）の合成音
+  'click', 'hover', 'key', 'title', 'ready', 'shuffle', 'draw', 'bgm_title',
 ];
+/** 試合中はこれ以外鳴らさない */
+const MATCH_SE = ['item_press', 'call', 'judge', 'item_judge', 'fanfare'];
+const MATCH_BGM = ['bgm_start', 'bgm_game'];
 
 export class Sound {
   constructor() {
@@ -114,6 +118,7 @@ export class Sound {
   // ---------------- 再生 ----------------
   play(name, opt = {}) {
     if (!this.ctx) return;
+    if (this.inMatch && !MATCH_SE.includes(name)) return;
     if (this.buffers[name]) {
       const src = this.ctx.createBufferSource(); src.buffer = this.buffers[name];
       const g = this.ctx.createGain(); g.gain.value = opt.gain || 1;
@@ -165,7 +170,13 @@ export class Sound {
     this.noise(0.12, { gain: 0.15, freq: 2000 });
   }
   s_zero() { this.tone(130, 0.45, { type: 'square', gain: 0.1, filter: { freq: 700 }, verb: 0.2 }); this.tone(123, 0.45, { type: 'square', gain: 0.08, filter: { freq: 700 }, at: 0.02 }); }
-  s_numer0n() {
+  s_judge() {
+    this.noise(0.2, { gain: 0.3, freq: 3000, type: 'highpass' });
+    this.chord([1046.5, 1318.5, 1568], 0.8, { type: 'triangle', gain: 0.1, verb: 0.6 });
+    this.boom(0, 0.5);
+  }
+  s_item_judge() { [1318.5, 1568, 2093].forEach((f, i) => this.tone(f, 0.18, { type: 'sine', gain: 0.14, at: i * 0.07, verb: 0.4 })); this.boom(0.2, 0.35); }
+  s_fanfare() {
     this.boom(0, 1.1); this.boom(0.35, 0.8);
     this.noise(2.5, { gain: 0.2, freq: 6000, type: 'highpass', verb: 0.8, attack: 0.3 });
     const seq = [523.3, 659.3, 784, 1046.5, 1318.5, 1568, 2093];
@@ -225,7 +236,31 @@ export class Sound {
   }
 
   // ---------------- BGM ----------------
+  /** 試合モード：指定の音以外を鳴らさない */
+  setMatch(on) {
+    this.inMatch = !!on;
+    if (on && this.bgmName && !MATCH_BGM.includes(this.bgmName)) this.stopBgm(), (this.bgmName = null);
+  }
+
+  /** 素材の長さ（ms）。無ければ null */
+  lengthOf(name) { const b = this.buffers[name]; return b ? Math.round(b.duration * 1000) : null; }
+
+  /** ゲームスタートBGMを1回流し、終わったら resolve */
+  jingle(name, fallbackMs) {
+    this.stopBgm(); this.bgmName = null;
+    if (!this.ctx) return new Promise((r) => setTimeout(r, fallbackMs));
+    if (this.buffers[name]) {
+      const src = this.ctx.createBufferSource(); src.buffer = this.buffers[name];
+      src.connect(this.bgmBus); src.start();
+      this._jingle = src;
+      return new Promise((r) => { src.onended = r; setTimeout(r, this.buffers[name].duration * 1000 + 300); });
+    }
+    this.s_start();
+    return new Promise((r) => setTimeout(r, fallbackMs));
+  }
+
   bgm(name, force) {
+    if (name && this.inMatch && !MATCH_BGM.includes(name)) name = null;
     if (!this.ctx) { this.bgmName = name; return; }
     if (this.bgmName === name && !force && (this._bgmSrc || this._seqTimer)) return;
     this.stopBgm();
@@ -241,6 +276,7 @@ export class Sound {
     this._startSeq(name);
   }
   stopBgm() {
+    if (this._jingle) { try { this._jingle.stop(); } catch (e) {} this._jingle = null; }
     if (this._bgmSrc) { const g = this._bgmGain, s = this._bgmSrc; try { g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.6); s.stop(this.ctx.currentTime + 0.7); } catch (e) {} this._bgmSrc = null; }
     if (this._seqTimer) { clearInterval(this._seqTimer); this._seqTimer = null; }
   }

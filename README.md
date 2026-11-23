@@ -38,11 +38,21 @@ assets/               画像・音（下記）
 | `assets/items/double.png` `highlow.png` `target.png` `slash.png` `time.png` `shuffle.png` `change.png` | アイテムアイコン（正方形・透過PNG推奨） |
 | `assets/memo_bg.png` | メモの背景（2560×1440） |
 | `assets/logo.png` | タイトルロゴ（任意・透過PNG。スタジオのモニターにも表示） |
-| `assets/videos/double.mp4` など | アイテム映像（任意・音声込みOK・最大15秒）。ファイル名はアイテム画像と同じ（double / highlow / target / slash / time / shuffle / change）。H.264のmp4推奨、1本10MB程度まで |
+| `assets/videos/double.mp4` など | アイテム映像（任意・音声込みOK）。使用時にモニターで再生され、5秒でカメラが戻ります（映像の途中でも打ち切り）。ファイル名はアイテム画像と同じ（double / highlow / target / slash / time / shuffle / change）。H.264のmp4推奨、1本10MB程度まで |
 | `assets/sounds/*.mp3` | 効果音の差し替え（任意。下の名前で置くと合成音の代わりに鳴る） |
 
-効果音の名前：`click` `hover` `key` `title` `start` `draw` `turn` `call` `drum` `eat` `bite` `zero` `numer0n` `item_attack` `item_defense` `info` `shuffle` `tick` `timeup` `win` `lose` `draw_game` `ready`
-BGM（ループ）：`bgm_title` `bgm_game` `bgm_result`
+試合中に鳴るのは次の音だけです（`assets/sounds/` に置くと差し替わります。無い場合は仮の合成音）
+| ファイル名 | 用途 |
+|---|---|
+| `bgm_start.mp3` | ゲームスタートBGM（GAME START表示と同時に流れ、終わったらゲーム開始） |
+| `bgm_game.mp3` | ゲーム中BGM（ループ） |
+| `item_press.mp3` | アイテムボタンPUSH |
+| `call.mp3` | コール音 |
+| `judge.mp3` | EAT / BITE 判定音 |
+| `item_judge.mp3` | アイテムジャッジ音（SLASH・HIGH&LOW・DOUBLEの開示・TARGETの結果・CHANGEのHIGH/LOW公開） |
+| `fanfare.mp3` | 3EAT（4・5EAT）達成ファンファーレ |
+
+メニュー画面などの試合外の音は合成音です。
 
 ## 操作
 - 数字キー：入力 / Enter：コール / Backspace：1文字消す / I：ITEMボタン / M：メモ

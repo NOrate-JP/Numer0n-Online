@@ -143,6 +143,8 @@ export class FirebaseNet {
       await runTransaction(this.ref(`rooms/${code}/meta`), (meta) => {
         if (!meta) return meta;
         if (meta.players) delete meta.players[this.uid];
+        // ホストが抜けたらCPUも消す（CPUはホストの端末で動いているため）
+        if (meta.host === this.uid && meta.players) for (const k of Object.keys(meta.players)) if (meta.players[k].cpu) delete meta.players[k];
         if (!meta.players || !Object.keys(meta.players).length) return null;
         if (meta.host === this.uid) meta.host = Object.keys(meta.players)[0];
         if (meta.status === 'playing') meta.status = 'lobby';
@@ -151,6 +153,21 @@ export class FirebaseNet {
       await set(this.ref(`secrets/${code}/${this.uid}`), null);
     } catch (e) { console.warn(e); }
     this.code = null;
+  }
+
+  /** ホスト用：CPUをプレイヤーとして追加 */
+  async addCpu(level = 'normal') {
+    return this.updateMeta((m) => {
+      const ps = Object.values(m.players || {}).filter((v) => (v.role || 'player') === 'player');
+      if (ps.length >= 2 || m.status !== 'lobby' || m.host !== this.uid) return m;
+      const id = 'cpu_' + Math.random().toString(36).slice(2, 8);
+      const label = { easy: 'やさしい', normal: 'ふつう', hard: 'つよい' }[level] || '';
+      m.players[id] = { name: `CPU（${label}）`, role: 'player', seat: ps.some((v) => v.seat === 0) ? 1 : 0, cpu: true, level, online: true, joinedAt: Date.now() };
+      return m;
+    });
+  }
+  async removeMember(uid) {
+    return this.updateMeta((m) => { if (m.players && m.players[uid] && m.players[uid].cpu) delete m.players[uid]; return m; });
   }
 
   /** 役割を変更（対戦 ⇔ 観戦）。対戦は最大2人 */

@@ -2,7 +2,7 @@
 //  Numer0n ONLINE - メイン（画面遷移・HUD・演出）
 // =============================================================
 import * as R from './rules.js';
-import { Player, Watcher } from './client.js';
+import { Player, Watcher, MANUAL_TYPES } from './client.js';
 import { CpuAgent } from './cpu.js';
 import { LocalStore, FirebaseNet, firebaseConfigured } from './net.js';
 import { Sound } from './sound.js';
@@ -324,7 +324,7 @@ function lobbyMembers() {
     return [{ u: 'me', name: app.name, online: true, role: 'player', seat: 0, host: true }, { u: 'cpu', name: 'CPU', online: true, role: 'player', seat: 1, cpu: true }];
   }
   const m = app.meta || {};
-  return Object.entries(m.players || {}).map(([u, p]) => ({ u, name: p.name, online: p.online !== false, role: p.role || 'player', seat: p.seat, joinedAt: p.joinedAt || 0, host: m.host === u }));
+  return Object.entries(m.players || {}).map(([u, p]) => ({ u, name: p.name, online: p.online !== false, role: p.role || 'player', seat: p.seat, joinedAt: p.joinedAt || 0, host: m.host === u, cpu: !!p.cpu, level: p.level }));
 }
 
 function renderLobby() {
@@ -336,6 +336,7 @@ function renderLobby() {
   const online = app.mode === 'online';
   const canEdit = (m) => online && (m.u === app.me || host);
   const roleBtn = (m) => {
+    if (m.cpu) return online && host ? `<button class="btn tiny ghost" data-rmcpu="${m.u}">外す</button>` : '';
     if (!canEdit(m)) return '';
     if (m.role === 'player') return `<button class="btn tiny ghost" data-role="${m.u}" data-to="spectator">観戦へ</button>`;
     return players.length < 2 ? `<button class="btn tiny" data-role="${m.u}" data-to="player">対戦へ</button>` : '';
@@ -355,6 +356,7 @@ function renderLobby() {
         <div class="vs-mini">VS</div>
         ${players[1] ? row(players[1], 1) : '<div class="pslot empty"><span class="blink">プレイヤー募集中…</span></div>'}
       </div>
+      ${online && host && players.length < 2 ? `<div class="add-cpu">CPUを追加 <select id="add-cpu-level"><option value="easy">やさしい</option><option value="normal" selected>ふつう</option><option value="hard">つよい</option></select><button class="btn tiny" id="btn-add-cpu">追加</button></div>` : ''}
       ${online ? `<div class="specs"><div class="specs-head">観戦者 <b>${specs.length}</b></div>
         <div class="spec-list">${specs.length ? specs.map((m) => `<div class="spec ${m.u === app.me ? 'me' : ''} ${m.online ? '' : 'off'}">👁 ${esc(m.name)}${m.host ? ' <em>HOST</em>' : ''}${roleBtn(m)}</div>`).join('') : '<div class="spec none">なし</div>'}</div></div>` : ''}
       ${!online ? `<label class="row">CPUの強さ <select id="cpu-level">
@@ -373,7 +375,7 @@ function renderLobby() {
         <label>勝敗 ${sel('winsNeeded')}</label>
         <label>考慮時間 ${sel('turnSec')}</label>
         <label>防御タイム ${sel('cooldownSec')}</label>
-        <label>装備アイテム ${sel('equip')}</label>
+        <label>最大装備アイテム ${sel('equip')}</label>
         <label>TIME延長 ${sel('timeItemSec')}</label>
       </div>
       <div class="set-sub">使用できるアイテム</div>
@@ -383,6 +385,7 @@ function renderLobby() {
       <label class="chk"><input type="checkbox" data-flag="noHLSlash" ${st.noHLSlash ? 'checked' : ''} ${host ? '' : 'disabled'}> HIGH&amp;LOW と SLASH の同時装備を禁止</label>
       <label class="chk"><input type="checkbox" data-flag="finalChance" ${st.finalChance ? 'checked' : ''} ${host ? '' : 'disabled'}> 先攻が当てたら後攻にラストチャンス</label>
       <label class="chk"><input type="checkbox" data-flag="itemMovie" ${st.itemMovie ? 'checked' : ''} ${host ? '' : 'disabled'}> アイテム使用時にモニターで映像を流す <small class="vids">${vids.length ? '映像あり：' + vids.map(itemName).join(' / ') : '映像ファイルなし'}</small></label>
+      <div class="detail-row"><button class="btn small ghost" id="btn-detail" ${players.length ? '' : 'disabled'}>詳細設定（プレイヤーごと）</button><span class="detail-sum">${detailSummary(players)}</span></div>
     </div>`;
   bindSfx($('#lobby'));
   $$('#lobby select[data-set]').forEach((e) => e.onchange = () => { app.settings[e.dataset.set] = +e.value; commitSettings(); });
@@ -396,6 +399,61 @@ function renderLobby() {
     goMenu();
   };
   $('#btn-start').onclick = startMatch;
+  $('#btn-detail').onclick = () => detailModal(players, host);
+  $$('#lobby [data-rmcpu]').forEach((b) => b.onclick = () => app.net.removeMember(b.dataset.rmcpu));
+  const ac = $('#btn-add-cpu'); if (ac) ac.onclick = () => app.net.addCpu($('#add-cpu-level').value);
+}
+
+function detailSummary(players) {
+  const pp = app.settings.perPlayer || {};
+  const lim = players.filter((m) => pp[m.u] && (pp[m.u].items || pp[m.u].nums));
+  return lim.length ? '制限あり：' + lim.map((m) => esc(m.name)).join(' / ') : '制限なし';
+}
+
+/** ルームマスターがプレイヤーごとに使用可能アイテム・ナンバーを切り替える */
+function detailModal(players, editable) {
+  const st = app.settings;
+  const work = {};
+  for (const m of players) {
+    const pp = (st.perPlayer || {})[m.u] || {};
+    work[m.u] = { items: new Set(pp.items || R.ITEM_ORDER), nums: new Set((pp.nums || '0123456789').split('')) };
+  }
+  const body = document.createElement('div');
+  const draw = () => {
+    body.innerHTML = players.map((m) => {
+      const w = work[m.u];
+      const warn = w.nums.size < st.digits ? `<span class="warn">数字が${st.digits}個以上必要です</span>` : '';
+      return `<div class="pp-block"><div class="pp-name">${esc(m.name)} ${warn}</div>
+        <div class="pp-row"><span>アイテム</span><div class="pp-items">${R.ITEM_ORDER.map((k) => `<button class="pp-t ${w.items.has(k) ? 'on' : ''} ${st.pool[k] ? '' : 'nopool'}" data-u="${m.u}" data-k="${k}" title="${st.pool[k] ? '' : '全体設定でOFF'}">${itemHTML(k, 'sm')}<small>${itemName(k)}</small></button>`).join('')}</div></div>
+        <div class="pp-row"><span>ナンバー</span><div class="pp-nums">${'0123456789'.split('').map((d) => `<button class="pp-t num ${w.nums.has(d) ? 'on' : ''}" data-u="${m.u}" data-n="${d}">${cardHTML(d, 'mini')}</button>`).join('')}</div></div></div>`;
+    }).join('') + (editable ? '' : '<p class="note">ホストのみ変更できます</p>');
+    if (!editable) return;
+    $$('.pp-t', body).forEach((b) => b.onclick = () => {
+      const w = work[b.dataset.u];
+      const set = b.dataset.k ? w.items : w.nums, v = b.dataset.k || b.dataset.n;
+      set.has(v) ? set.delete(v) : set.add(v);
+      sound.play('click'); draw();
+    });
+  };
+  draw();
+  openModal({
+    title: '詳細設定（プレイヤーごと）', cls: 'wide', body,
+    buttons: editable ? [
+      { label: 'すべてON', cls: 'ghost', close: false, onClick: () => { for (const u in work) { work[u].items = new Set(R.ITEM_ORDER); work[u].nums = new Set('0123456789'.split('')); } draw(); } },
+      { label: 'キャンセル', cls: 'ghost' },
+      { label: '保存', cls: 'primary', onClick: () => {
+        if (Object.values(work).some((w) => w.nums.size < st.digits)) { toast(`ナンバーは${st.digits}個以上選んでください`); return false; }
+        const pp = Object.assign({}, st.perPlayer || {});
+        for (const [u, w] of Object.entries(work)) {
+          const items = w.items.size >= R.ITEM_ORDER.length ? null : R.ITEM_ORDER.filter((k) => w.items.has(k));
+          const nums = w.nums.size >= 10 ? null : [...w.nums].sort().join('');
+          if (items || nums) pp[u] = { items, nums }; else delete pp[u];
+        }
+        app.settings.perPlayer = pp;
+        commitSettings();
+      } },
+    ] : [{ label: 'とじる', cls: 'primary' }],
+  });
 }
 
 function commitSettings() {
@@ -407,24 +465,31 @@ function commitSettings() {
 
 function matchSettings() {
   const st = R.sanitizeSettings(app.settings);
-  st.videoMs = {};
-  if (st.itemMovie) for (const k of R.ITEM_ORDER) if (VIDEO[k]) st.videoMs[k] = VIDEO[k].ms;
+  st.startMs = sound.lengthOf('bgm_start') || 2200;
   return st;
+}
+
+function checkNums(st, seats) {
+  for (const u of seats) if (R.allowedNums(st, u).length < st.digits) { toast(`${app.names[u] || ''} の使用可能ナンバーが足りません`); return false; }
+  return true;
 }
 
 async function startMatch() {
   if (!isHost()) return;
   const st = matchSettings();
   if (app.mode === 'local') {
+    if (!checkNums(st, ['me', 'cpu'])) return;
     leaveSession();
     app.store = new LocalStore();
     app.store.subscribe((s) => onStoreState(s));
-    app.cpu = new CpuAgent(app.store, 'cpu', app.cpuLevel);
+    app.cpuAgents = [new CpuAgent(app.store, 'cpu', app.cpuLevel)];
     await app.store.update(() => R.newMatch(['me', 'cpu'], st, Date.now()));
   } else {
     const players = lobbyMembers().filter((m) => m.role === 'player').sort((a, b) => a.seat - b.seat);
     if (players.length !== 2) return;
-    await app.store.reset(R.newMatch(players.map((p) => p.u), st, app.net.now()));
+    if (!checkNums(st, players.map((p) => p.u))) return;
+    const manualReveal = !players.some((p) => p.cpu);
+    await app.store.reset(R.newMatch(players.map((p) => p.u), st, app.net.now(), { manualReveal }));
     await app.net.updateMeta((m) => { m.status = 'playing'; return m; });
   }
 }
@@ -436,17 +501,28 @@ async function spectateDemo() {
   app.names = { cpuA: 'CPU-A', cpuB: 'CPU-B', viewer: app.name };
   app.store = new LocalStore();
   app.store.subscribe((s) => onStoreState(s));
-  app.cpu = new CpuAgent(app.store, 'cpuA', 'hard');
-  app.cpu2 = new CpuAgent(app.store, 'cpuB', 'normal');
+  app.cpuAgents = [new CpuAgent(app.store, 'cpuA', 'hard'), new CpuAgent(app.store, 'cpuB', 'normal')];
   await app.store.update(() => R.newMatch(['cpuA', 'cpuB'], matchSettings(), Date.now()));
 }
 
 // -------------------------------------------------------------
 //  セッション（Player / Watcher）
 // -------------------------------------------------------------
+function destroyCpus() { for (const c of app.cpuAgents || []) c.destroy(); app.cpuAgents = []; }
+
 function ensureSession(s) {
   if (app.player && app.sessionKey === s.createdAt) return;
   if (app.player) app.player.destroy();
+  // オンライン：CPUはホストの端末で動かす
+  if (app.mode === 'online') {
+    destroyCpus();
+    if (isHost() && app.meta) {
+      for (const u of s.seats) {
+        const p = app.meta.players && app.meta.players[u];
+        if (p && p.cpu) { const c = new CpuAgent(app.store, u, p.level || 'normal'); c.player.restoreSecret(); app.cpuAgents.push(c); }
+      }
+    }
+  }
   director.reset();
   lastPhaseKey = null;
   app.sessionKey = s.createdAt;
@@ -458,8 +534,7 @@ function ensureSession(s) {
 }
 
 function leaveSession() {
-  if (app.cpu) { app.cpu.destroy(); app.cpu = null; }
-  if (app.cpu2) { app.cpu2.destroy(); app.cpu2 = null; }
+  destroyCpus();
   if (app.player) { app.player.destroy(); app.player = null; }
   app.sessionKey = null;
   app.state = null;
@@ -468,6 +543,8 @@ function leaveSession() {
   closeModal(true); hideResult();
   $('#cutin').innerHTML = '';
   document.body.classList.remove('spectator', 'monitor-focus');
+  sound.setMatch(false);
+  const rp = $('#reveal-pane'); if (rp) rp.remove();
 }
 
 let lastPhaseKey = null;
@@ -507,13 +584,15 @@ function enterSetup() {
     studio.setMonitor({ mode: 'text', big: `GAME ${app.state.game}`, small: 'セッティング中…' });
     studio.setConsole('SETTING');
   }
-  sound.bgm('bgm_title');
+  sound.setMatch(true);
+  sound.bgm(null);
   const prev = JSON.parse(localStorage.getItem('numer0n_items') || 'null') || ['highlow', 'target', 'shuffle', 'change', 'double', 'slash', 'time'];
   const st = app.state.settings;
+  const allowedIt = R.allowedItems(st, app.me);
   const conflict = (k) => st.noHLSlash && ((k === 'slash' && setupSel.items.includes('highlow')) || (k === 'highlow' && setupSel.items.includes('slash')));
   for (const k of prev.concat(R.ITEM_ORDER)) {
     if (setupSel.items.length >= st.equip) break;
-    if (!R.ITEM_DEFS[k] || !st.pool[k] || setupSel.items.includes(k) || conflict(k)) continue;
+    if (!R.ITEM_DEFS[k] || !allowedIt.includes(k) || setupSel.items.includes(k) || conflict(k)) continue;
     setupSel.items.push(k);
   }
   renderSetup(true);
@@ -548,16 +627,18 @@ function renderSetup(force) {
   const sig = JSON.stringify([ready, oppReady, setupSel, s.game]);
   if (!force && root._sig === sig) return;
   root._sig = sig;
-  const itemsOk = R.validateItems(setupSel.items, st);
-  const numOk = R.isValidNumber(setupSel.num, D);
+  const itemsOk = R.validateItems(setupSel.items, st, app.me);
+  const nums = R.allowedNums(st, app.me);
+  const numOk = R.isValidNumber(setupSel.num, D, nums);
+  const allowedIt = R.allowedItems(st, app.me);
   const conflict = st.noHLSlash && setupSel.items.includes('highlow') && setupSel.items.includes('slash');
   root.innerHTML = headHTML + `
     <div class="setup-body ${ready ? 'locked' : ''}">
       <div class="panel setup-items">
-        <div class="panel-head">ITEM SELECT <span class="cnt ${setupSel.items.length === st.equip ? 'ok' : ''}">${setupSel.items.length} / ${st.equip}</span></div>
-        ${st.equip === 0 ? '<p class="note">このルールではアイテムを使いません</p>' : ''}
+        <div class="panel-head">ITEM SELECT <small>最大${st.equip}個まで</small><span class="cnt ok">${setupSel.items.length} / ${st.equip}</span></div>
+        ${st.equip === 0 || !allowedIt.length ? '<p class="note">アイテムは使いません</p>' : ''}
         <div class="item-grid">
-          ${R.ITEM_ORDER.filter((k) => st.pool[k]).map((k) => {
+          ${allowedIt.map((k) => {
             const on = setupSel.items.includes(k);
             const d = R.ITEM_DEFS[k];
             return `<button class="item-card ${on ? 'on' : ''} ${d.kind}" data-pick="${k}" style="--ic:${d.color}">
@@ -570,7 +651,7 @@ function renderSetup(force) {
       <div class="panel setup-num">
         <div class="panel-head">NUMBER SET <small>同じ数字は使えません</small></div>
         <div class="num-slots">${Array.from({ length: D }, (_, i) => setupSel.num[i] != null ? cardHTML(setupSel.num[i], 'slot filled') : '<div class="card slot empty"></div>').join('')}</div>
-        <div class="num-pick">${Array.from({ length: 10 }, (_, d) => `<button class="pick" data-d="${d}" ${setupSel.num.includes(String(d)) || setupSel.num.length >= D ? 'disabled' : ''}>${cardHTML(d)}</button>`).join('')}</div>
+        <div class="num-pick">${Array.from({ length: 10 }, (_, d) => `<button class="pick ${nums.includes(String(d)) ? '' : 'banned'}" data-d="${d}" ${!nums.includes(String(d)) || setupSel.num.includes(String(d)) || setupSel.num.length >= D ? 'disabled' : ''}>${cardHTML(d)}</button>`).join('')}</div>
         <div class="num-btns">
           <button class="btn small ghost" id="num-clear">クリア</button>
           <button class="btn small ghost" id="num-back">1つ戻す</button>
@@ -591,6 +672,7 @@ function renderSetup(force) {
     const i = setupSel.items.indexOf(k);
     if (i >= 0) setupSel.items.splice(i, 1);
     else {
+      if (st.equip === 0) return;
       if (setupSel.items.length >= st.equip) setupSel.items.shift();
       setupSel.items.push(k);
     }
@@ -602,9 +684,9 @@ function renderSetup(force) {
   });
   $('#num-clear').onclick = () => { setupSel.num = ''; renderSetup(); };
   $('#num-back').onclick = () => { setupSel.num = setupSel.num.slice(0, -1); renderSetup(); };
-  $('#num-rand').onclick = () => { const all = R.allNumbers(D); setupSel.num = all[Math.floor(Math.random() * all.length)]; sound.play('shuffle'); renderSetup(); };
+  $('#num-rand').onclick = () => { const all = R.allNumbers(D, nums); setupSel.num = all[Math.floor(Math.random() * all.length)]; sound.play('shuffle'); renderSetup(); };
   $('#btn-ready').onclick = async () => {
-    if (!R.validateItems(setupSel.items, st) || !R.isValidNumber(setupSel.num, D)) return;
+    if (!R.validateItems(setupSel.items, st, app.me) || !R.isValidNumber(setupSel.num, D, nums)) return;
     localStorage.setItem('numer0n_items', JSON.stringify(setupSel.items));
     sound.play('ready');
     await app.player.setup(setupSel.num, setupSel.items.slice());
@@ -622,7 +704,9 @@ function enterGame() {
     studio.setOpponent(app.names[app.opp] || 'OPPONENT');
     studio.setCelebrate(false);
   }
-  sound.bgm('bgm_game');
+  sound.setMatch(true);
+  // 途中参加・再読み込み時はすぐゲーム中BGM（通常はゲームスタートBGMの後）
+  if (app.state.phase === 'play' && now() > app.state.startAt) sound.bgm('bgm_game');
   buildHud();
 }
 
@@ -854,6 +938,7 @@ function renderTurnBox() {
     const p = s.pending;
     if (p.type === 'call') subText = 'JUDGING…';
     else if (p.type === 'declare') subText = p.by === app.me ? 'アイテムを宣言してください' : `${app.names[p.by] || ''} がアイテムを宣言中…`;
+    else if (MANUAL_TYPES.includes(p.type) && s.manualReveal) subText = p.responder === app.me ? '公開ボタンを押してください' : `${app.names[p.responder] || ''} が公開するのを待っています…`;
     else if (p.type === 'double_choose') subText = p.responder === app.me ? '開示させる桁を選んでください' : `${app.names[p.responder] || ''} が開示する桁を選んでいます…`;
     else subText = 'アイテム処理中…';
   } else if (t < s.cooldownUntil) {
@@ -982,7 +1067,7 @@ function changeModal(pid) {
   let pos = null, nd = null;
   const body = document.createElement('div');
   const draw = () => {
-    const cands = pos != null ? R.changeCandidates(sec, pos) : [];
+    const cands = pos != null ? R.changeCandidates(sec, pos, R.allowedNums(app.state.settings, app.me)) : [];
     body.innerHTML = `<p>① 交換する桁を選ぶ　② 同じ分類（${pos != null ? (R.hlOf(sec[pos]) === 'H' ? 'HIGH：5〜9' : 'LOW：0〜4') : 'HIGH/LOW'}）の数字を選ぶ</p>${declareTimerHTML()}
       <div class="pick-row big">${sec.split('').map((d, i) => `<button class="pick ${pos === i ? 'on' : ''}" data-p="${i}">${cardHTML(pos === i && nd != null ? nd : d)}<small>${R.posLabel(i, D)}</small></button>`).join('')}</div>
       ${pos != null ? `<div class="pick-row">${cands.length ? cands.map((d) => `<button class="pick ${nd === d ? 'on' : ''}" data-n="${d}">${cardHTML(d)}</button>`).join('') : '<p class="warn">交換できる数字がありません</p>'}</div>` : ''}
@@ -1035,8 +1120,31 @@ async function itemPressCut(by) {
   el.classList.add('out'); await sleep(300); el.remove();
 }
 
+/** 情報公開ボタン（人間同士の対戦のみ） */
+function renderRevealPane() {
+  const s = app.state;
+  const p = s && s.pending;
+  const need = s && s.phase === 'play' && s.manualReveal && !isSpec() && !director.busy && p && MANUAL_TYPES.includes(p.type) && p.responder === app.me;
+  let el = $('#reveal-pane');
+  if (!need) { if (el) el.remove(); return; }
+  if (el && el.dataset.pid === String(p.id)) return;
+  if (el) el.remove();
+  const D = s.settings.digits;
+  const key = p.type === 'double_reveal' ? 'double' : p.type;
+  const def = R.ITEM_DEFS[key];
+  const what = { highlow: 'あなたの番号の HIGH / LOW', slash: 'あなたのスラッシュナンバー', target: `「${p.digit}」の位置`, double: `あなたの${R.posLabel(p.pos, D)}` }[key];
+  el = document.createElement('div');
+  el.id = 'reveal-pane'; el.dataset.pid = p.id;
+  el.style.setProperty('--ic', def.color);
+  el.innerHTML = `<div class="rp-head">${itemHTML(key, 'sm')}<b>${def.name}</b></div><p>${what}を公開します</p><button class="btn primary big" id="rp-btn">公開する</button>`;
+  $('#ui').appendChild(el);
+  $('#rp-btn').onclick = () => { if (app.player.reveal()) el.remove(); };
+}
+
 function checkPendingPrompts() {
-  const s = app.state; if (!s || director.busy || isSpec()) return;
+  const s = app.state; if (!s) return;
+  renderRevealPane();
+  if (director.busy || isSpec()) return;
   const p = s.pending;
   if (p && p.type === 'double_choose' && p.responder === app.me) {
     if (modalCtx && modalCtx.tag === 'dbl' + p.id) return;
@@ -1135,21 +1243,21 @@ async function animate(e) {
     case 'call': return animCall(e);
     case 'item': return animItem(e);
     case 'highlow': {
-      sound.play('info');
+      sound.play('item_judge');
       const html = e.result.split('').map((h) => `<i class="${h}">${h === 'H' ? 'HIGH' : 'LOW'}</i>`).join('');
       if (studio) studio.setMonitor({ mode: 'text', big: e.result.split('').join(' '), small: 'HIGH & LOW', color: R.ITEM_DEFS.highlow.color });
       return infoCut('highlow', `${whose(R.other(s, e.by))}の番号は…`, `<div class="hl big">${html}</div>`);
     }
     case 'slash':
-      sound.play('info');
+      sound.play('item_judge');
       if (studio) studio.setMonitor({ mode: 'text', big: String(e.value), small: 'SLASH NUMBER', color: R.ITEM_DEFS.slash.color });
       return infoCut('slash', `${whose(R.other(s, e.by))}のスラッシュナンバーは`, `<div class="bignum">${e.value}</div>`);
     case 'target':
-      sound.play(e.pos >= 0 ? 'eat' : 'zero', { n: 0 });
+      sound.play('item_judge');
       if (studio) studio.setMonitor({ mode: 'text', big: `${e.digit} → ${e.pos >= 0 ? R.posLabel(e.pos, D) : 'NONE'}`, small: 'TARGET', color: R.ITEM_DEFS.target.color, size: 90 });
       return infoCut('target', `「${e.digit}」は${whose(R.other(s, e.by))}の番号に…`, e.pos >= 0 ? `<div class="bignum">${R.posLabel(e.pos, D)}</div>` : `<div class="bignum none">ありません</div>`);
     case 'double':
-      sound.play('info');
+      sound.play('item_judge');
       if (studio) studio.setMonitor({ mode: 'text', big: `${R.posLabel(e.pos, D)} = ${e.digit}`, small: `${app.names[e.by]} の番号を開示`, color: R.ITEM_DEFS.double.color, size: 90 });
       return infoCut('double', `${whose(e.by)}の${R.posLabel(e.pos, D)}を開示`, `<div class="reveal-card">${cardHTML(e.digit)}</div><p>このターン、2回コールできます</p>`);
     case 'timeout':
@@ -1169,7 +1277,7 @@ async function animate(e) {
 async function animStart(e) {
   const s = app.state;
   if (studio) { studio.setShot('wide', 1.2); studio.setMonitor({ mode: 'logo' }); }
-  sound.bgm('bgm_game');
+  sound.bgm(null);
   const el = cutLayer('order');
   const a = app.view, b = app.opp;
   el.innerHTML = `<div class="order-box">
@@ -1191,8 +1299,14 @@ async function animStart(e) {
   await sleep(1500);
   el.classList.add('out'); await sleep(300); el.remove();
   if (studio) { studio.setShot('seat', 1.6); studio.flash('#ffffff', 1.2); studio.pulse('#ffffff', 60); }
-  sound.play('start');
-  await banner('GAME START', `GAME ${s.game}　${s.settings.digits}桁`, '#4a6bff', 1700, 'huge');
+  // ゲームスタート表示と同時にゲームスタートBGM。流れ終わったらゲーム開始
+  const bn = cutLayer('banner huge');
+  bn.style.setProperty('--bc', '#4a6bff');
+  bn.innerHTML = `<div class="band"><div class="b-text">GAME START</div><div class="b-sub">GAME ${s.game}　${s.settings.digits}桁</div></div>`;
+  const left = Math.max(0, s.startAt - now() - 200);
+  await Promise.race([sound.jingle('bgm_start', s.settings.startMs), sleep(left + 400)]);
+  bn.classList.add('out'); setTimeout(() => bn.remove(), 350);
+  sound.bgm('bgm_game');
 }
 
 async function animCall(e) {
@@ -1208,20 +1322,18 @@ async function animCall(e) {
     <div class="cc-cards">${e.num.split('').map((d, i) => `<div class="cc-card" style="--i:${i}">${cardHTML(d)}</div>`).join('')}</div>
     <div class="cc-res"><div class="eat"><b>?</b><span>EAT</span></div><div class="bite"><b>?</b><span>BITE</span></div></div>
   </div>`;
-  await sleep(300 + D * 120);
-  sound.play('drum', { dur: 1.0 });
-  await sleep(1050);
+  await sleep(300 + D * 120 + 900);
+  // EAT・BITE を同時に表示して判定音
   $('.eat b', el).textContent = e.eat; $('.eat', el).classList.add('show');
-  if (e.eat > 0) { sound.play('eat', { n: e.eat }); if (studio) studio.pulse('#ff4060', 50); } else sound.play('zero');
-  await sleep(550);
   $('.bite b', el).textContent = e.bite; $('.bite', el).classList.add('show');
-  if (e.bite > 0) { sound.play('bite', { n: e.bite }); if (studio) studio.pulse('#40c0ff', 40); }
+  sound.play('judge');
+  if (studio) studio.pulse(e.eat ? '#ff4060' : '#40c0ff', 50);
   if (studio) studio.setMonitor({ mode: 'call', who: app.names[e.by], num: e.num, eat: e.eat, bite: e.bite });
   if (e.eat === D) {
     await sleep(500);
     el.classList.add('hit');
     $('.cc-band', el).insertAdjacentHTML('beforeend', `<div class="numer0n">${D}EAT!!</div>`);
-    sound.play('numer0n');
+    sound.play('fanfare');
     if (studio) { studio.flash('#ffd040', 3); studio.pulse('#ffd040', 90); studio.setMonitor({ mode: 'text', big: `${D} EAT`, small: `${app.names[e.by]} が番号を的中！`, color: '#d0a020' }); }
     await sleep(2600);
   } else {
@@ -1241,6 +1353,7 @@ async function focusMonitor(fn) {
 }
 
 async function playItemVideo(key, maxMs) {
+  // maxMs で打ち切る（映像の途中でもカメラを戻す）
   const v = VIDEO[key];
   sound.attachMedia(v.el);
   sound.duck(true);
@@ -1253,32 +1366,30 @@ async function playItemVideo(key, maxMs) {
   } finally { sound.duck(false); }
 }
 
+/** アイテム：モニターに注目 → 映像（5秒で戻る）→ 効果を処理 */
+const FOCUS_MS = 5000;
 async function animItem(e) {
   const def = R.ITEM_DEFS[e.item];
   const s = app.state;
-  const mine = e.by === app.view;
-  const name = esc(app.names[e.by] || '');
-  if (studio) { studio.flash(def.color, 2.2); studio.pulse(def.color, 70); studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[e.by]} が使用`, color: def.color }); }
-  sound.play(def.kind === 'attack' ? 'item_attack' : 'item_defense', { pitch: 0.8 + R.ITEM_ORDER.indexOf(e.item) * 0.08 });
-  const el = cutLayer('itemcut ' + def.kind);
-  el.style.setProperty('--ic', def.color);
-  let sub = '';
-  if (e.item === 'change') sub = `${R.posLabel(e.pos, s.settings.digits)} を交換　（${e.hl === 'H' ? 'HIGH' : 'LOW'}）`;
-  if (e.item === 'shuffle') sub = mine && !isSpec() ? '番号を並べ替えました' : '番号が並べ替えられた！？';
-  if (e.item === 'time') sub = `考慮時間 +${e.sec}秒`;
-  if (e.item === 'target') sub = `指定した数字：${e.digit}`;
-  if (e.item === 'double') sub = '開示する桁を相手が選びます';
-  el.innerHTML = `<div class="ic-band"><div class="ic-icon">${itemHTML(e.item, 'huge')}</div>
-    <div class="ic-text"><div class="ic-kind">${def.kind === 'attack' ? 'ATTACK ITEM' : 'DEFENSE ITEM'}</div><div class="ic-big">${def.name}</div><div class="ic-who">${name}</div>${sub ? `<div class="ic-sub">${sub}</div>` : ''}</div></div>`;
-  if (e.item === 'shuffle') setTimeout(() => sound.play('shuffle'), 700);
-  const hasVideo = s.settings.itemMovie && s.settings.videoMs[e.item] && VIDEO[e.item];
-  await sleep(hasVideo ? 1300 : 1500);
-  el.classList.add('out'); setTimeout(() => el.remove(), 350);
-  if (hasVideo) {
-    await focusMonitor(() => playItemVideo(e.item, Math.min(s.settings.videoMs[e.item], 15000) + 300));
-  } else {
-    await focusMonitor(() => sleep(1300));
+  const D = s.settings.digits;
+  const video = s.settings.itemMovie && VIDEO[e.item];
+  if (studio) { studio.flash(def.color, 2.2); studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[e.by]} が使用`, color: def.color }); }
+  await focusMonitor(async () => {
+    await sleep(500); // カメラ移動
+    if (video) await playItemVideo(e.item, FOCUS_MS);
+    else await sleep(FOCUS_MS);
+  });
+  if (studio) studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[e.by]}`, color: def.color });
+  await sleep(400);
+  // 結果がすぐ出るアイテムはここで表示
+  if (e.item === 'change') {
+    sound.play('item_judge');
+    if (studio) studio.setMonitor({ mode: 'text', big: `${R.posLabel(e.pos, D)} ${e.hl === 'H' ? 'HIGH' : 'LOW'}`, small: 'CHANGE', color: def.color, size: 90 });
+    return infoCut('change', `${whose(e.by)}の${R.posLabel(e.pos, D)}が交換されました`, `<div class="hl big"><i class="${e.hl}">${e.hl === 'H' ? 'HIGH' : 'LOW'}</i></div>`);
   }
+  if (e.item === 'shuffle') return infoCut('shuffle', `${whose(e.by)}の番号が並べ替えられました`, '<div class="bignum">SHUFFLE</div>');
+  if (e.item === 'time') return infoCut('time', `${whose(e.by)}の考慮時間`, `<div class="bignum">+${e.sec}秒</div>`);
+  if (e.item === 'double') return infoCut('double', 'このターン2回コールできます', `<p>${whose(R.other(s, e.by))}が開示させる桁を選びます</p>`);
 }
 
 async function infoCut(key, title, html) {

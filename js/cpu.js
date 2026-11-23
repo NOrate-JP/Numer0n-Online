@@ -25,11 +25,11 @@ function shuffleSet(cands) {
   return [...set];
 }
 
-function changeSet(cands, pos, hl) {
+function changeSet(cands, pos, hl, allowed) {
   const set = new Set();
   for (const c of cands) {
     if (R.hlOf(c[pos]) !== hl) continue;
-    for (const d of R.changeCandidates(c, pos)) set.add(c.slice(0, pos) + d + c.slice(pos + 1));
+    for (const d of R.changeCandidates(c, pos, allowed)) set.add(c.slice(0, pos) + d + c.slice(pos + 1));
   }
   return [...set];
 }
@@ -52,11 +52,13 @@ function expectedRemain(cands, keyFn) {
 }
 
 export class Knowledge {
-  constructor(me, D) {
+  constructor(me, D, myNums, oppNums) {
     this.me = me;
     this.D = D;
-    this.cands = R.allNumbers(D);
-    this.oppView = R.allNumbers(D);
+    this.myNums = myNums || '0123456789';
+    this.oppNums = oppNums || '0123456789';
+    this.cands = R.allNumbers(D, this.oppNums);
+    this.oppView = R.allNumbers(D, this.myNums);
     this.lastId = 0;
   }
   ingest(log) {
@@ -87,12 +89,12 @@ export class Knowledge {
         case 'item': {
           const t = mine ? 'oppView' : 'cands'; // e.by の番号が変わった
           if (e.item === 'shuffle') this[t] = shuffleSet(this[t]);
-          if (e.item === 'change') this[t] = changeSet(this[t], e.pos, e.hl);
+          if (e.item === 'change') this[t] = changeSet(this[t], e.pos, e.hl, mine ? this.myNums : this.oppNums);
           break;
         }
       }
     }
-    if (!this.cands.length) this.cands = R.allNumbers(this.D); // 念のため
+    if (!this.cands.length) this.cands = R.allNumbers(this.D, this.oppNums); // 念のため
   }
 
   bestGuess(level) {
@@ -127,7 +129,10 @@ export class CpuAgent {
     if (s.phase === 'setup') { this.kn = null; if (!(s.setup[this.uid] && s.setup[this.uid].ready)) this.doSetup(s); return; }
     if (s.phase === 'gameover') { this.doNext(s); return; }
     if (s.phase !== 'play') return;
-    if (!this.kn || this.kn.game !== s.game) { this.kn = new Knowledge(this.uid, s.settings.digits); this.kn.game = s.game; }
+    if (!this.kn || this.kn.game !== s.game) {
+      this.kn = new Knowledge(this.uid, s.settings.digits, R.allowedNums(s.settings, this.uid), R.allowedNums(s.settings, R.other(s, this.uid)));
+      this.kn.game = s.game;
+    }
     this.kn.ingest(s.log);
     const now = this.player.now();
     const p = s.pending;
@@ -141,7 +146,7 @@ export class CpuAgent {
     this.busy = true;
     await sleep(1200 + Math.random() * 1500);
     const st = s.settings;
-    const pool = R.ITEM_ORDER.filter((k) => st.pool[k]);
+    const pool = R.allowedItems(st, this.uid);
     let pref = ['highlow', 'change', 'slash', 'shuffle', 'target', 'double', 'time'];
     if (this.level !== 'hard') pref = pref.slice(0, 6).sort(() => Math.random() - 0.5).concat(['time']);
     let items = [];
@@ -151,7 +156,7 @@ export class CpuAgent {
       if (st.noHLSlash && ((k === 'slash' && items.includes('highlow')) || (k === 'highlow' && items.includes('slash')))) continue;
       items.push(k);
     }
-    const num = rnd(R.allNumbers(st.digits));
+    const num = rnd(R.allNumbers(st.digits, R.allowedNums(st, this.uid)));
     await this.player.setup(num, items.slice(0, st.equip));
     this.busy = false;
   }
@@ -252,7 +257,7 @@ export class CpuAgent {
     }
     if (hasC) {
       for (let pos = 0; pos < D; pos++) {
-        const sz = changeSet(view, pos, R.hlOf(sec[pos])).length;
+        const sz = changeSet(view, pos, R.hlOf(sec[pos]), this.kn.myNums).length;
         if (sz > planSize) { planSize = sz; plan = { key: 'change', pos }; }
       }
     }
@@ -264,7 +269,7 @@ export class CpuAgent {
       const ns = Math.random() < 0.1 ? sec : rnd(ps);
       await this.player.defend('shuffle', ns, {});
     } else {
-      const d = rnd(R.changeCandidates(sec, plan.pos));
+      const d = rnd(R.changeCandidates(sec, plan.pos, this.kn.myNums));
       const ns = sec.slice(0, plan.pos) + d + sec.slice(plan.pos + 1);
       await this.player.defend('change', ns, { pos: plan.pos, hl: R.hlOf(sec[plan.pos]) });
     }

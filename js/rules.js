@@ -32,22 +32,32 @@ export const DEFAULT_SETTINGS = {
   winsNeeded: 1,        // 何ゲーム先取
   finalChance: false,   // 先攻が当てたら後攻に最後の1ターン（同時なら引き分け）
   itemMovie: true,      // アイテム使用時にモニターで映像を流す
-  videoMs: {},          // 各アイテム映像の長さ(ms)。ホストが開始時に書き込む
+  startMs: 2200,        // ゲームスタートBGMの長さ(ms)。ホストが開始時に書き込む
+  perPlayer: {},        // { uid: { items: [使用可能アイテム] | null, nums: '使用可能な数字' | null } }
 };
 
-export const ORDER_MS = 6800;       // 先攻決め演出の時間
+export const ORDER_MS = 4400;       // 先攻決め演出の時間（このあとゲームスタートBGM）
 export const REVEAL_MS = 4200;      // コール判定演出の最低時間
 export const INFO_MS = 3000;        // アイテム結果演出の時間
-export const ITEM_FX_MS = 2800;     // 映像なしのアイテム演出時間
+export const ITEM_FX_MS = 5900;     // アイテム演出（モニター注目5秒＋カメラ移動）
+export const REVEAL_LIMIT_MS = 30000; // 情報公開ボタンを押さなかった場合の自動公開
 export const DECLARE_MS = 25000;    // アイテムボタンを押してから宣言するまでの制限
 export const MAX_MEMBERS = 12;      // ルームの最大人数（観戦者含む）
 const INFO_ITEMS = ['highlow', 'slash', 'target', 'double'];
 
 /** アイテム演出（映像）の長さ */
-export function fxMs(s, key) {
-  const st = s.settings;
-  const v = st.itemMovie && st.videoMs && st.videoMs[key];
-  return v ? Math.min(v, 15000) + 1600 : ITEM_FX_MS;
+export function fxMs() { return ITEM_FX_MS; }
+
+const ALL_NUMS = '0123456789';
+/** プレイヤーごとの使用可能アイテム */
+export function allowedItems(st, uid) {
+  const pp = st.perPlayer && st.perPlayer[uid];
+  return ITEM_ORDER.filter((k) => st.pool[k] && (!pp || !pp.items || pp.items.includes(k)));
+}
+/** プレイヤーごとの使用可能ナンバー（文字列） */
+export function allowedNums(st, uid) {
+  const pp = st.perPlayer && st.perPlayer[uid];
+  return pp && pp.nums ? pp.nums : ALL_NUMS;
 }
 
 export const hlOf = (d) => (Number(d) >= 5 ? 'H' : 'L');
@@ -61,8 +71,9 @@ export function judge(secret, call) {
   return { eat, bite };
 }
 
-export function isValidNumber(str, digits) {
-  return typeof str === 'string' && str.length === digits && /^\d+$/.test(str) && new Set(str).size === digits;
+export function isValidNumber(str, digits, allowed) {
+  return typeof str === 'string' && str.length === digits && /^\d+$/.test(str) && new Set(str).size === digits
+    && (!allowed || str.split('').every((c) => allowed.includes(c)));
 }
 
 export function slashOf(num) {
@@ -79,12 +90,12 @@ export function targetOf(num, digit) {
 }
 
 /** CHANGEで使える数字（同じHIGH/LOW・番号に含まれない） */
-export function changeCandidates(num, pos) {
+export function changeCandidates(num, pos, allowed = ALL_NUMS) {
   const cls = hlOf(num[pos]);
   const out = [];
   for (let d = 0; d <= 9; d++) {
     const c = String(d);
-    if (hlOf(d) === cls && !num.includes(c)) out.push(c);
+    if (hlOf(d) === cls && !num.includes(c) && allowed.includes(c)) out.push(c);
   }
   return out;
 }
@@ -111,14 +122,24 @@ export function sanitizeSettings(raw) {
   const vm = {};
   for (const k of ITEM_ORDER) { const v = Number(s.videoMs && s.videoMs[k]); if (v > 0) vm[k] = Math.min(v, 15000); }
   s.videoMs = vm;
+  s.startMs = Math.max(500, Math.min(20000, +s.startMs || 2200));
+  const pp = {};
+  for (const [u, v] of Object.entries(s.perPlayer || {})) {
+    if (!v) continue;
+    const items = Array.isArray(v.items) ? v.items.filter((k) => ITEM_DEFS[k]) : null;
+    const nums = typeof v.nums === 'string' ? [...new Set(v.nums.replace(/[^0-9]/g, ''))].sort().join('') : null;
+    pp[u] = { items, nums: nums && nums.length < 10 ? nums : null };
+  }
+  s.perPlayer = pp;
   return s;
 }
 
-export function validateItems(items, settings) {
+export function validateItems(items, settings, uid) {
   if (!Array.isArray(items)) return false;
-  if (items.length !== settings.equip) return false;
+  if (items.length > settings.equip) return false;   // 最大装備数以内ならOK
   if (new Set(items).size !== items.length) return false;
-  if (!items.every((k) => ITEM_DEFS[k] && settings.pool[k])) return false;
+  const ok = allowedItems(settings, uid);
+  if (!items.every((k) => ITEM_DEFS[k] && ok.includes(k))) return false;
   if (settings.noHLSlash && items.includes('highlow') && items.includes('slash')) return false;
   return true;
 }
@@ -212,11 +233,12 @@ export function actCancelDeclare(s, uid, now, force) {
 //  マッチ / ゲーム進行
 // -------------------------------------------------------------
 
-export function newMatch(seats, settings, now) {
+export function newMatch(seats, settings, now, opts = {}) {
   const s = {
     v: 1, seats: seats.slice(0, 2), settings: sanitizeSettings(settings),
     phase: 'setup', game: 1, seq: 0, wins: {}, setup: {}, log: [], createdAt: now,
     specView: seats[Math.floor(Math.random() * 2)],   // 観戦者が見る視点（マッチ中固定）
+    manualReveal: !!opts.manualReveal,                 // 情報公開をボタンで行う（人間同士のオンライン対戦）
   };
   return norm(s);
 }
@@ -224,7 +246,7 @@ export function newMatch(seats, settings, now) {
 export function submitSetup(s, uid, items, now) {
   s = norm(s);
   if (!s || s.phase !== 'setup' || !s.seats.includes(uid)) return undefined;
-  if (!validateItems(items, s.settings)) return undefined;
+  if (!validateItems(items, s.settings, uid)) return undefined;
   s.setup[uid] = { ready: true, items: items.slice() };
   if (s.seats.every((u) => s.setup[u] && s.setup[u].ready)) startGame(s, now);
   return s;
@@ -247,14 +269,14 @@ function startGame(s, now) {
   s.items = {};
   for (const u of s.seats) {
     s.items[u] = {};
-    for (const k of s.setup[u].items) s.items[u][k] = 'unused';
+    for (const k of s.setup[u].items || []) s.items[u][k] = 'unused';
   }
   s.reveals = {}; s.final = {}; s.nextReady = {}; s.secretVer = {};
   s.result = null; s.finalChance = null; s.pending = null; s.matchOver = false;
   s.phase = 'play';
   s.turnNo = 0;
   s.log = [];
-  s.startAt = now + ORDER_MS;
+  s.startAt = now + ORDER_MS + s.settings.startMs + 300;
   pushLog(s, { type: 'start', first, draws: s.order.draws }, now);
   beginTurn(s, first, s.startAt, true);
   norm(s);
@@ -334,7 +356,7 @@ export function actAttack(s, uid, key, args, now) {
   if (key === 'target') e.digit = Number(args.digit);
   if (key === 'time') e.sec = s.settings.timeItemSec;
   pushLog(s, e, now);
-  const extra = fxMs(s, key) + (INFO_ITEMS.includes(key) ? INFO_MS : 0);
+  const extra = fxMs(s, key) + INFO_MS;
   s.cooldownUntil = Math.max(s.cooldownUntil, now + extra);
   if (s.turnDeadline) s.turnDeadline += extra;
   switch (key) {
@@ -382,7 +404,7 @@ export function actDefense(s, uid, key, info, now) {
   s.secretVer[uid] = (s.secretVer[uid] || 0) + 1;
   pushLog(s, e, now);
   // 演出時間ぶん攻撃側の行動を待たせる
-  s.cooldownUntil = Math.max(s.cooldownUntil, now + fxMs(s, key) + 400);
+  s.cooldownUntil = Math.max(s.cooldownUntil, now + fxMs(s, key) + INFO_MS);
   if (s.turnDeadline) s.turnDeadline = Math.max(s.turnDeadline, s.cooldownUntil + 5000);
   return s;
 }
@@ -482,12 +504,12 @@ export function actNext(s, uid, now) {
 }
 
 /** ログ1件分の情報が、ある番号候補と矛盾しないか（CPU・候補計算用） */
-export function allNumbers(D) {
+export function allNumbers(D, allowed = ALL_NUMS) {
   const out = [];
   const rec = (pre, used) => {
     if (pre.length === D) { out.push(pre); return; }
     for (let d = 0; d <= 9; d++) {
-      if (used & (1 << d)) continue;
+      if (used & (1 << d) || !allowed.includes(String(d))) continue;
       rec(pre + d, used | (1 << d));
     }
   };

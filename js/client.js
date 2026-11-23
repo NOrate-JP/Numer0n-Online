@@ -5,6 +5,8 @@
 // =============================================================
 import * as R from './rules.js';
 
+export const MANUAL_TYPES = ['highlow', 'slash', 'target', 'double_reveal'];
+
 export class Player {
   /**
    * @param store  { subscribe(cb), update(fn) => Promise<bool>, now(), saveSecret?(data), loadSecret?() }
@@ -73,6 +75,9 @@ export class Player {
       this.store.update((cur) => R.actCancelDeclare(cur, this.uid, this.now(), true));
       return;
     }
+    // 公開ボタンを押さないまま放置 → 自動公開
+    const p = s.pending;
+    if (p && p.responder === this.uid && MANUAL_TYPES.includes(p.type) && now > (p.at || now) + R.REVEAL_LIMIT_MS) this.reveal();
     if (s.pending || !s.turnDeadline) return;
     // 手番側は即座に、相手側は少し待ってからタイムアウト処理（切断対策）
     const grace = s.turn === this.uid ? 0 : 4000;
@@ -86,6 +91,12 @@ export class Player {
     if (!p || p.responder !== this.uid) return;
     if (this._respId === p.id) return;
     if (p.type === 'double_choose') return; // 人が選ぶ（CPUはcpu.jsで処理）
+    // 人間同士のオンライン対戦では、情報の公開は本人がボタンで行う
+    if (s.manualReveal && !this.isCpu && MANUAL_TYPES.includes(p.type)) return;
+    this._respond(p, p.type === 'call' ? 350 : 500);
+  }
+
+  _respond(p, delay = 0) {
     const sec = this.secret;
     if (!sec) return;
     let result;
@@ -98,8 +109,6 @@ export class Player {
       default: return;
     }
     this._respId = p.id;
-    // 判定に少し「間」を置く
-    const delay = p.type === 'call' ? 350 : 500;
     setTimeout(() => {
       this.store.update((cur) => R.resolvePending(cur, this.uid, p.id, result, this.now()))
         .then((ok) => { if (!ok && this.state && this.state.pending && this.state.pending.id === p.id) this._respId = null; });
@@ -159,6 +168,14 @@ export class Player {
     if (!ok) delete this.secrets[ver];
     else this._persist();
     return ok;
+  }
+
+  /** 情報公開ボタン */
+  reveal() {
+    const p = this.state && this.state.pending;
+    if (!p || p.responder !== this.uid || !MANUAL_TYPES.includes(p.type) || this._respId === p.id) return false;
+    this._respond(p, 0);
+    return true;
   }
 
   async chooseDouble(pos) {
