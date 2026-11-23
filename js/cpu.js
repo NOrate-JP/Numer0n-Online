@@ -245,7 +245,11 @@ export class CpuAgent {
     if (view.length > th) return;
     if (this.level === 'easy' && Math.random() < 0.5) return;
     this.busy = true;
-    await sleep(900 + Math.random() * 1600);
+    // 判定の演出が終わってから数秒あけて使う
+    const lastCall = [...s.log].reverse().find((e) => e.type === 'call');
+    const base = lastCall ? lastCall.t : this.player.now();
+    const wait = base + 6500 + Math.random() * 2000 - this.player.now();
+    await sleep(Math.max(900, wait));
     const cur = this.player.state;
     if (!cur || !R.canDefend(cur, this.uid)) { this.busy = false; return; }
     const sec = this.player.secret;

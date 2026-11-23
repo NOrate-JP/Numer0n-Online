@@ -5,7 +5,7 @@
 // =============================================================
 import * as R from './rules.js';
 
-export const MANUAL_TYPES = ['highlow', 'slash', 'target', 'double_reveal'];
+export const MANUAL_TYPES = ['call', 'highlow', 'slash', 'target', 'double_reveal'];
 
 export class Player {
   /**
@@ -202,13 +202,15 @@ export class Watcher {
     this.uid = uid;
     this.isWatcher = true;
     this.onState = opts.onState || null;
+    this.pickView = opts.pickView || ((s) => s.seats[Math.floor(Math.random() * 2)]);
     this.state = null;
     this.view = null;
+    this.secretError = false;
     this.viewSecrets = {};
     this._unsubSecret = null;
     this._unsub = store.subscribe((s) => {
       this.state = s ? R.norm(JSON.parse(JSON.stringify(s))) : null;
-      if (this.state && this.state.specView !== this.view) this._watch(this.state.specView);
+      if (this.state && (!this.view || !this.state.seats.includes(this.view))) this._watch(this.pickView(this.state));
       if (this.onState) this.onState(this.state);
     });
   }
@@ -217,11 +219,18 @@ export class Watcher {
     if (this._unsubSecret) this._unsubSecret();
     this.viewSecrets = {};
     if (this.store.watchSecret) {
-      this._unsubSecret = this.store.watchSecret(view, (d) => {
+      this._unsubSecret = this.store.watchSecret(view, (d, err) => {
+        this.secretError = !!err;
         this.viewSecrets = (d && d.vers) ? Object.assign({}, d.vers) : {};
         if (this.onState && this.state) this.onState(this.state);
       });
     }
+  }
+  /** 視点プレイヤーを切り替える */
+  setView(uid) {
+    if (!this.state || !this.state.seats.includes(uid)) return;
+    this._watch(uid);
+    if (this.onState) this.onState(this.state);
   }
   destroy() { if (this._unsub) this._unsub(); if (this._unsubSecret) this._unsubSecret(); }
   now() { return this.store.now(); }

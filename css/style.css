@@ -615,3 +615,28 @@ body:not([data-screen="scr-setup"]) #sys-memo { display: none; }
 .pick.banned .card { opacity: 0.15; }
 .pick.banned::after { content: '✕'; position: absolute; color: #ff4060; font-size: 30px; font-weight: 900; }
 .num-pick .pick { position: relative; justify-content: center; }
+
+/* =============================================================
+   v4 追加
+   ============================================================= */
+.menu-tiles { display: flex; justify-content: center; width: max-content; max-width: 96vw; flex-wrap: wrap; }
+.menu-tiles .tile { width: clamp(150px, 15vw, 220px); }
+.tile.orange { background: linear-gradient(180deg, #ffb340, #c0600a); }
+#reveal-pane { top: auto; bottom: 30px; transform: translateX(-50%); }
+#reveal-pane.judge { bottom: 30px; }
+.view-pick { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.spec-setup .view-pick { margin-top: 14px; font-size: 13px; }
+.callcut.waiting .cc-res > div { animation: blink 1.1s infinite; }
+/* 詰めヌメロン */
+#puzzle { position: absolute; inset: 0; }
+.pz-time { font-family: var(--en); font-weight: 900; font-size: 30px; letter-spacing: 0.05em; color: #fff; text-shadow: 0 0 14px var(--neon); }
+.pz-top .pl-name small { font-family: var(--en); color: #ffb340; }
+.pz-side { display: flex; flex-direction: column; gap: 8px; }
+.pz-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.pz-opt > span { width: 52px; color: var(--dim); }
+.pz-tries { flex: 1; }
+.pz-err { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); }
+.input-area.shake { animation: shake 0.4s; }
+@keyframes shake { 20% { transform: translateX(calc(-50% - 10px)); } 40% { transform: translateX(calc(-50% + 10px)); } 60% { transform: translateX(calc(-50% - 6px)); } 80% { transform: translateX(calc(-50% + 6px)); } }
+body[data-screen="scr-puzzle"] #memo { top: 96px; left: 316px; right: 316px; bottom: 12px; }
+#puzzle .log { bottom: 12px; }

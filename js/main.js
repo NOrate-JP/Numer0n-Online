@@ -7,6 +7,7 @@ import { CpuAgent } from './cpu.js';
 import { LocalStore, FirebaseNet, firebaseConfigured } from './net.js';
 import { Sound } from './sound.js';
 import { Memo } from './memo.js';
+import { generatePuzzle } from './puzzle.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -116,7 +117,8 @@ function show(id) {
   app.screen = id;
   $$('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
   document.body.dataset.screen = id;
-  if (id !== 'scr-game' && id !== 'scr-setup' && memo && memo.open) memo.toggle(false);
+  if (id !== 'scr-game' && id !== 'scr-setup' && id !== 'scr-puzzle' && memo && memo.open) memo.toggle(false);
+  if (id !== 'scr-puzzle') stopPuzzleTimer();
 }
 
 function toast(msg, ms = 2200) {
@@ -385,6 +387,7 @@ function renderLobby() {
       <label class="chk"><input type="checkbox" data-flag="noHLSlash" ${st.noHLSlash ? 'checked' : ''} ${host ? '' : 'disabled'}> HIGH&amp;LOW と SLASH の同時装備を禁止</label>
       <label class="chk"><input type="checkbox" data-flag="finalChance" ${st.finalChance ? 'checked' : ''} ${host ? '' : 'disabled'}> 先攻が当てたら後攻にラストチャンス</label>
       <label class="chk"><input type="checkbox" data-flag="itemMovie" ${st.itemMovie ? 'checked' : ''} ${host ? '' : 'disabled'}> アイテム使用時にモニターで映像を流す <small class="vids">${vids.length ? '映像あり：' + vids.map(itemName).join(' / ') : '映像ファイルなし'}</small></label>
+      <label class="chk"><input type="checkbox" data-flag="revealButton" ${st.revealButton ? 'checked' : ''} ${host ? '' : 'disabled'}> 判定・アイテム結果を「公開ボタン」で公開する <small class="vids">（人間同士のオンライン対戦のみ）</small></label>
       <div class="detail-row"><button class="btn small ghost" id="btn-detail" ${players.length ? '' : 'disabled'}>詳細設定（プレイヤーごと）</button><span class="detail-sum">${detailSummary(players)}</span></div>
     </div>`;
   bindSfx($('#lobby'));
@@ -488,7 +491,7 @@ async function startMatch() {
     const players = lobbyMembers().filter((m) => m.role === 'player').sort((a, b) => a.seat - b.seat);
     if (players.length !== 2) return;
     if (!checkNums(st, players.map((p) => p.u))) return;
-    const manualReveal = !players.some((p) => p.cpu);
+    const manualReveal = st.revealButton && !players.some((p) => p.cpu);
     await app.store.reset(R.newMatch(players.map((p) => p.u), st, app.net.now(), { manualReveal }));
     await app.net.updateMeta((m) => { m.status = 'playing'; return m; });
   }
@@ -528,7 +531,7 @@ function ensureSession(s) {
   app.sessionKey = s.createdAt;
   const watching = !s.seats.includes(app.me);
   app.player = watching
-    ? new Watcher(app.store, app.me, { onState: onGameState })
+    ? new Watcher(app.store, app.me, { onState: onGameState, pickView: (st) => st.seats[Math.floor(Math.random() * 2)] })
     : new Player(app.store, app.me, { onState: onGameState });
   if (!watching && app.mode === 'online') app.player.restoreSecret();
 }
@@ -551,9 +554,11 @@ let lastPhaseKey = null;
 function onGameState(s) {
   app.state = s;
   if (!s) return;
-  app.view = s.seats.includes(app.me) ? app.me : (s.specView || s.seats[0]);
+  const prevView = app.view;
+  app.view = s.seats.includes(app.me) ? app.me : (app.player.view || s.seats[0]);
   app.opp = R.other(s, app.view);
   document.body.classList.toggle('spectator', isSpec());
+  if (prevView && prevView !== app.view && studio && s.phase !== 'setup') studio.setOpponent(app.names[app.opp] || 'OPPONENT');
   const key = s.phase + ':' + s.game + ':' + s.createdAt;
   if (key !== lastPhaseKey) {
     lastPhaseKey = key;
@@ -561,7 +566,7 @@ function onGameState(s) {
     else if (s.phase === 'play' || s.phase === 'gameover') enterGame();
   }
   if (s.phase === 'setup') renderSetup();
-  else { director.feed(s); renderGame(); checkPendingPrompts(); checkDeclare(s); }
+  else { director.feed(s); renderGame(); checkPendingPrompts(); checkDeclare(s); checkCallPending(s); }
 }
 
 // -------------------------------------------------------------
@@ -586,15 +591,6 @@ function enterSetup() {
   }
   sound.setMatch(true);
   sound.bgm(null);
-  const prev = JSON.parse(localStorage.getItem('numer0n_items') || 'null') || ['highlow', 'target', 'shuffle', 'change', 'double', 'slash', 'time'];
-  const st = app.state.settings;
-  const allowedIt = R.allowedItems(st, app.me);
-  const conflict = (k) => st.noHLSlash && ((k === 'slash' && setupSel.items.includes('highlow')) || (k === 'highlow' && setupSel.items.includes('slash')));
-  for (const k of prev.concat(R.ITEM_ORDER)) {
-    if (setupSel.items.length >= st.equip) break;
-    if (!R.ITEM_DEFS[k] || !allowedIt.includes(k) || setupSel.items.includes(k) || conflict(k)) continue;
-    setupSel.items.push(k);
-  }
   renderSetup(true);
 }
 
@@ -611,14 +607,15 @@ function renderSetup(force) {
     </div>`;
 
   if (isSpec()) {
-    const sig = JSON.stringify(['spec', s.setup, s.game]);
+    const sig = JSON.stringify(['spec', s.setup, s.game, app.view]);
     if (!force && root._sig === sig) return;
     root._sig = sig;
     root.innerHTML = headHTML + `<div class="panel spec-setup">
       <div class="panel-head">SPECTATING</div>
       <p>両プレイヤーがアイテムと番号を設定しています…</p>
       <div class="spec-ready">${s.seats.map((u) => `<div class="${s.setup[u] && s.setup[u].ready ? 'ok' : ''}"><b>${esc(app.names[u])}</b><span>${s.setup[u] && s.setup[u].ready ? 'READY' : '準備中…'}</span></div>`).join('')}</div>
-      <p class="note">観戦中は <b>${esc(app.names[app.view])}</b> の視点で試合を見ます。</p></div>`;
+      <div class="view-pick">視点：${specViewButtons(s)}</div></div>`;
+    bindViewPick(root);
     return;
   }
 
@@ -738,7 +735,7 @@ function buildHud() {
         <button class="btn call-btn" id="k-call">CALL</button>
       </div>
     </div>
-    <div class="spec-bar"><span class="eye">👁</span><div><b>観戦中</b><small></small></div></div>
+    <div class="spec-bar"><span class="eye">👁</span><div><b>観戦中</b><small></small></div><div class="view-pick"></div></div>
     <div class="hud-btns">
       <button class="btn small ghost" id="h-memo">✎ MEMO</button>
       <button class="btn small ghost" id="h-rule">RULE</button>
@@ -878,6 +875,8 @@ function renderGame() {
   $('.log-opp .panel-head').textContent = spec ? `${app.names[opp] || ''} の CALL` : 'OPPONENT CALL';
   $('.my-label').textContent = spec ? `${app.names[me] || ''} の番号` : 'YOUR NUMBER';
   $('.spec-bar small').textContent = `${app.names[me] || ''} の視点`;
+  if (spec && setHTML($('.spec-bar .view-pick'), specViewButtons(s))) bindViewPick($('.spec-bar'));
+  if (spec && !(app.player && app.player.secret)) $('.my-label').textContent = app.player && app.player.secretError ? '番号を読めません（Firebaseのルールを更新してください）' : `${app.names[me] || ''} の番号（読み込み中）`;
 
   const k = knownAboutOpp(s, shown);
   const finalOpp = s.phase === 'gameover' && director.idle() ? s.final[opp] : null;
@@ -909,6 +908,19 @@ function renderGame() {
   renderInput();
 }
 
+function specViewButtons(s) {
+  return s.seats.map((u) => `<button class="btn tiny ${app.view === u ? 'primary' : 'ghost'}" data-view="${u}">${esc(app.names[u] || '')}</button>`).join('')
+    + `<button class="btn tiny ghost" data-view="random">ランダム</button>`;
+}
+function bindViewPick(root) {
+  $$('[data-view]', root).forEach((b) => b.onclick = () => {
+    const s = app.state; if (!s || !isSpec()) return;
+    const u = b.dataset.view === 'random' ? s.seats[Math.floor(Math.random() * 2)] : b.dataset.view;
+    app.player.setView(u);
+    if (s.phase === 'setup') renderSetup(true);
+  });
+}
+
 function isShownUsed(shown, uid, key) {
   return shown.some((e) => e.by === uid && ((e.type === 'item' && e.item === key) || (e.type === key)));
 }
@@ -936,7 +948,8 @@ function renderTurnBox() {
   const canDefNow = !spec && R.canDefend(s, app.me) && R.hasUnused(s, app.me, 'defense');
   if (s.pending) {
     const p = s.pending;
-    if (p.type === 'call') subText = 'JUDGING…';
+    if (MANUAL_TYPES.includes(p.type) && s.manualReveal) subText = p.responder === app.me ? (p.type === 'call' ? '判定を公開してください' : '公開ボタンを押してください') : `${app.names[p.responder] || ''} が公開するのを待っています…`;
+    else if (p.type === 'call') subText = 'JUDGING…';
     else if (p.type === 'declare') subText = p.by === app.me ? 'アイテムを宣言してください' : `${app.names[p.by] || ''} がアイテムを宣言中…`;
     else if (MANUAL_TYPES.includes(p.type) && s.manualReveal) subText = p.responder === app.me ? '公開ボタンを押してください' : `${app.names[p.responder] || ''} が公開するのを待っています…`;
     else if (p.type === 'double_choose') subText = p.responder === app.me ? '開示させる桁を選んでください' : `${app.names[p.responder] || ''} が開示する桁を選んでいます…`;
@@ -1130,6 +1143,15 @@ function renderRevealPane() {
   if (el && el.dataset.pid === String(p.id)) return;
   if (el) el.remove();
   const D = s.settings.digits;
+  if (p.type === 'call') {
+    el = document.createElement('div');
+    el.id = 'reveal-pane'; el.dataset.pid = p.id; el.className = 'judge';
+    el.style.setProperty('--ic', '#ff4d63');
+    el.innerHTML = `<div class="rp-head"><b>JUDGE</b></div><p>コール「${p.num}」の判定を公開します</p><button class="btn primary big" id="rp-btn">公開する</button>`;
+    $('#ui').appendChild(el);
+    $('#rp-btn').onclick = () => { if (app.player.reveal()) el.remove(); };
+    return;
+  }
   const key = p.type === 'double_reveal' ? 'double' : p.type;
   const def = R.ITEM_DEFS[key];
   const what = { highlow: 'あなたの番号の HIGH / LOW', slash: 'あなたのスラッシュナンバー', target: `「${p.digit}」の位置`, double: `あなたの${R.posLabel(p.pos, D)}` }[key];
@@ -1309,20 +1331,38 @@ async function animStart(e) {
   sound.bgm('bgm_game');
 }
 
+/** コール直後（判定前）の表示。判定はあとで animCall が同じ要素を使って出す */
+function buildCallCut(by, num) {
+  const mine = by === app.view;
+  const name = esc(app.names[by] || '');
+  if (studio) { studio.pressButton(mine); studio.setMonitor({ mode: 'call', who: app.names[by], num }); studio.flash(mine ? '#4a6bff' : '#c04aff', 1); }
+  sound.play('call');
+  const el = cutLayer('callcut ' + (mine ? 'mine' : 'theirs'));
+  el.dataset.num = num; el.dataset.by = by;
+  el.innerHTML = `<div class="cc-band">
+    <div class="cc-who">${name} <span>CALL</span></div>
+    <div class="cc-cards">${num.split('').map((d, i) => `<div class="cc-card" style="--i:${i}">${cardHTML(d)}</div>`).join('')}</div>
+    <div class="cc-res"><div class="eat"><b>?</b><span>EAT</span></div><div class="bite"><b>?</b><span>BITE</span></div></div>
+  </div>`;
+  return el;
+}
+let callSeen = null;
+function checkCallPending(s) {
+  const p = s.pending;
+  if (!p || p.type !== 'call' || callSeen === p.id || director.busy || director.q.length) return;
+  callSeen = p.id;
+  const el = buildCallCut(p.by, p.num);
+  el.classList.add('waiting');
+}
+
 async function animCall(e) {
   const s = app.state;
   const D = s.settings.digits;
-  const mine = e.by === app.view;
-  const name = esc(app.names[e.by] || '');
-  if (studio) { studio.pressButton(mine); studio.setMonitor({ mode: 'call', who: app.names[e.by], num: e.num }); studio.flash(mine ? '#4a6bff' : '#c04aff', 1); }
-  sound.play('call');
-  const el = cutLayer('callcut ' + (mine ? 'mine' : 'theirs'));
-  el.innerHTML = `<div class="cc-band">
-    <div class="cc-who">${name} <span>CALL</span></div>
-    <div class="cc-cards">${e.num.split('').map((d, i) => `<div class="cc-card" style="--i:${i}">${cardHTML(d)}</div>`).join('')}</div>
-    <div class="cc-res"><div class="eat"><b>?</b><span>EAT</span></div><div class="bite"><b>?</b><span>BITE</span></div></div>
-  </div>`;
-  await sleep(300 + D * 120 + 900);
+  const waiting = $$('#cutin .callcut.waiting').find((x) => x.dataset.num === e.num && x.dataset.by === e.by);
+  $$('#cutin .callcut.waiting').forEach((x) => { if (x !== waiting) x.remove(); });
+  let el;
+  if (waiting) { el = waiting; el.classList.remove('waiting'); await sleep(Math.max(0, 1300 - (now() - e.t))); }
+  else { el = buildCallCut(e.by, e.num); await sleep(300 + D * 120 + 900); }
   // EAT・BITE を同時に表示して判定音
   $('.eat b', el).textContent = e.eat; $('.eat', el).classList.add('show');
   $('.bite b', el).textContent = e.bite; $('.bite', el).classList.add('show');
@@ -1504,11 +1544,131 @@ function showRules() {
 }
 
 // -------------------------------------------------------------
+//  詰めヌメロン（β）
+// -------------------------------------------------------------
+const pz = { D: +(localStorage.getItem('numer0n_pz_d') || 3), level: localStorage.getItem('numer0n_pz_lv') || 'normal', puzzle: null, input: '', start: 0, miss: 0, cleared: false, timer: null, tries: [] };
+const fmtTime = (ms) => { const t = Math.max(0, ms); const m = Math.floor(t / 60000), sec = Math.floor(t / 1000) % 60, cs = Math.floor(t / 10) % 100; return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(cs).padStart(2, '0')}`; };
+const bestKey = () => `numer0n_pz_best_${pz.D}_${pz.level}`;
+function stopPuzzleTimer() { if (pz.timer) { clearInterval(pz.timer); pz.timer = null; } }
+
+function goPuzzle() {
+  leaveSession();
+  app.mode = null;
+  show('scr-puzzle');
+  sound.bgm('bgm_title');
+  if (studio) { studio.setShot('seat', 1.4); studio.setOpponent(null); studio.setCelebrate(false); studio.setMonitor({ mode: 'text', big: '詰めヌメロン', small: 'PUZZLE β', size: 100 }); studio.setConsole('PUZZLE'); }
+  newPuzzle();
+}
+
+function newPuzzle() {
+  pz.puzzle = generatePuzzle(pz.D, pz.level);
+  pz.input = ''; pz.miss = 0; pz.cleared = false; pz.tries = [];
+  pz.start = performance.now();
+  stopPuzzleTimer();
+  pz.timer = setInterval(() => { const t = $('#pz-time'); if (t && !pz.cleared) t.textContent = fmtTime(performance.now() - pz.start); }, 50);
+  renderPuzzle(true);
+  sound.play('ready');
+}
+
+function clueRow(c, i) {
+  if (c.type === 'call') {
+    const res = c.eat === 0 && c.bite === 0 ? '<span class="zero">0E 0B</span>' : `<span class="e">${c.eat}<i>EAT</i></span><span class="b">${c.bite}<i>BITE</i></span>`;
+    return `<div class="lrow call"><span class="no">${i}</span><span class="num">${c.num.split('').map((d) => `<i>${d}</i>`).join('')}</span><span class="res">${res}</span></div>`;
+  }
+  if (c.type === 'highlow') return `<div class="lrow litem" style="--ic:${R.ITEM_DEFS.highlow.color}">${itemHTML('highlow', 'xs')}<b>H&amp;L</b><span class="hl">${c.result.split('').map((h) => `<i class="${h}">${h === 'H' ? 'HIGH' : 'LOW'}</i>`).join('')}</span></div>`;
+  if (c.type === 'slash') return `<div class="lrow litem" style="--ic:${R.ITEM_DEFS.slash.color}">${itemHTML('slash', 'xs')}<b>SLASH</b><span>スラッシュナンバー <em>${c.value}</em></span></div>`;
+  if (c.type === 'target') return `<div class="lrow litem" style="--ic:${R.ITEM_DEFS.target.color}">${itemHTML('target', 'xs')}<b>TARGET</b><span><em>${c.digit}</em> → ${c.pos >= 0 ? R.posLabel(c.pos, pz.D) : 'なし'}</span></div>`;
+  return '';
+}
+
+function renderPuzzle(full) {
+  const root = $('#puzzle');
+  const p = pz.puzzle;
+  if (!p) { root.innerHTML = '<div class="panel pz-err">問題を作れませんでした。もう一度お試しください。</div>'; return; }
+  const best = localStorage.getItem(bestKey());
+  if (full) {
+    let n = 0;
+    root.innerHTML = `
+      <div class="hud-top pz-top">
+        <div class="plate me"><div class="pl-name">詰めヌメロン <small>β</small></div></div>
+        <div class="turnbox"><div class="turn-label">TIME</div><div class="pz-time" id="pz-time">00:00.00</div><div class="turn-sub" id="pz-sub"></div></div>
+        <div class="plate opp"><div class="pl-name">BEST ${best ? fmtTime(+best) : '--:--.--'}</div></div>
+      </div>
+      <div class="opp-area"><div class="opp-cards">${Array.from({ length: p.D }, () => `<div class="ocard">${cardHTML(null)}</div>`).join('')}</div></div>
+      <div class="panel log log-me pz-log"><div class="panel-head">HINT <small>答えは1通りに決まります</small></div><div class="log-list">${p.clues.map((c) => clueRow(c, c.type === 'call' ? ++n : 0)).join('')}</div></div>
+      <div class="panel log log-opp pz-side">
+        <div class="panel-head">SETTING</div>
+        <div class="pz-opt"><span>桁数</span>${[3, 4].map((d) => `<button class="btn tiny ${pz.D === d ? 'primary' : 'ghost'}" data-pzd="${d}">${d}桁</button>`).join('')}</div>
+        <div class="pz-opt"><span>難易度</span>${[['normal', 'ふつう'], ['hard', 'むずかしい']].map(([v, l]) => `<button class="btn tiny ${pz.level === v ? 'primary' : 'ghost'}" data-pzl="${v}">${l}</button>`).join('')}</div>
+        <p class="note">ふつう：アイテムのヒントあり<br>むずかしい：コールのヒントのみ・少なめ</p>
+        <div class="panel-head">ANSWER LOG</div><div class="log-list pz-tries"></div>
+      </div>
+      <div class="input-area active">
+        <div class="call-slots"></div>
+        <div class="keypad">${Array.from({ length: 10 }, (_, d) => `<button class="kp" data-pz="${d}">${cardHTML(d, 'mini')}</button>`).join('')}</div>
+        <div class="key-btns"><button class="btn ghost" data-pz="del">DEL</button><button class="btn call-btn" id="pz-ans">ANSWER</button></div>
+      </div>
+      <div class="hud-btns">
+        <button class="btn small ghost" id="pz-memo">✎ MEMO</button>
+        <button class="btn small ghost" id="pz-new">NEW</button>
+        <button class="btn small ghost" id="pz-quit">やめる</button>
+      </div>`;
+    $$('[data-pz]', root).forEach((b) => b.onclick = () => puzzleKey(b.dataset.pz));
+    $('#pz-ans').onclick = puzzleAnswer;
+    $('#pz-memo').onclick = () => memo.toggle();
+    $('#pz-new').onclick = newPuzzle;
+    $('#pz-quit').onclick = goMenu;
+    $$('[data-pzd]', root).forEach((b) => b.onclick = () => { pz.D = +b.dataset.pzd; localStorage.setItem('numer0n_pz_d', pz.D); newPuzzle(); });
+    $$('[data-pzl]', root).forEach((b) => b.onclick = () => { pz.level = b.dataset.pzl; localStorage.setItem('numer0n_pz_lv', pz.level); newPuzzle(); });
+    bindSfx(root);
+  }
+  setHTML($('.call-slots', root), Array.from({ length: p.D }, (_, i) => pz.input[i] != null ? cardHTML(pz.input[i], 'slot filled') : '<div class="card slot empty"></div>').join(''));
+  $$('.kp', root).forEach((b) => b.disabled = pz.cleared || pz.input.includes(b.dataset.pz) || pz.input.length >= p.D);
+  $('#pz-ans').disabled = pz.cleared || pz.input.length !== p.D;
+  setHTML($('.pz-tries', root), pz.tries.map((t) => `<div class="lrow ${t.ok ? 'hit' : ''}"><span class="num">${t.num.split('').map((d) => `<i>${d}</i>`).join('')}</span><span class="res">${t.ok ? '<span class="e">CLEAR</span>' : '<span class="zero">✕</span>'}</span></div>`).join('') || '<div class="lrow empty">—</div>');
+  $('#pz-sub').textContent = pz.cleared ? 'CLEAR!' : (pz.miss ? `ミス ${pz.miss}回` : '相手の番号を当ててください');
+}
+
+function puzzleKey(k) {
+  const p = pz.puzzle; if (!p || pz.cleared) return;
+  if (k === 'del') pz.input = pz.input.slice(0, -1);
+  else if (pz.input.length < p.D && !pz.input.includes(k)) { pz.input += k; sound.play('key', { n: pz.input.length }); }
+  renderPuzzle();
+}
+
+async function puzzleAnswer() {
+  const p = pz.puzzle; if (!p || pz.cleared || pz.input.length !== p.D) return;
+  const num = pz.input; pz.input = '';
+  if (num === p.secret) {
+    pz.cleared = true;
+    const t = performance.now() - pz.start;
+    stopPuzzleTimer();
+    $('#pz-time').textContent = fmtTime(t);
+    pz.tries.push({ num, ok: true });
+    const best = +(localStorage.getItem(bestKey()) || 0);
+    const isBest = !best || t < best;
+    if (isBest) localStorage.setItem(bestKey(), Math.round(t));
+    renderPuzzle();
+    setHTML($('.opp-cards'), num.split('').map((d) => `<div class="ocard">${cardHTML(d, 'known')}</div>`).join(''));
+    sound.play('fanfare');
+    if (studio) { studio.flash('#ffd040', 3); studio.setCelebrate(true); studio.setMonitor({ mode: 'text', big: fmtTime(t), small: isBest ? 'NEW RECORD!' : 'CLEAR', color: '#d0a020' }); }
+    await banner('CLEAR!', `${fmtTime(t)}${pz.miss ? `（ミス${pz.miss}回）` : ''}${isBest ? '　NEW RECORD!' : ''}`, '#f0b020', 2600, 'huge');
+    if (studio) studio.setCelebrate(false);
+  } else {
+    pz.miss++;
+    pz.tries.push({ num, ok: false });
+    sound.play('zero');
+    const ia = $('#puzzle .input-area'); ia.classList.remove('shake'); void ia.offsetWidth; ia.classList.add('shake');
+    renderPuzzle();
+  }
+}
+
+// -------------------------------------------------------------
 //  キーボード
 // -------------------------------------------------------------
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'm' || e.key === 'M') { if (memo && (app.screen === 'scr-game' || app.screen === 'scr-setup' || memo.open)) memo.toggle(); return; }
+  if (e.key === 'm' || e.key === 'M') { if (memo && (app.screen === 'scr-game' || app.screen === 'scr-setup' || app.screen === 'scr-puzzle' || memo.open)) memo.toggle(); return; }
   if (memo && memo.open) return;
   if ($('#modal').classList.contains('show')) {
     if (e.key === 'Escape' && modalCtx) {
@@ -1516,6 +1676,12 @@ window.addEventListener('keydown', (e) => {
       if (tag.startsWith('decl')) { cancelDeclare(); closeModal(true); }
       else if (!tag.startsWith('dbl')) closeModal();
     }
+    return;
+  }
+  if (app.screen === 'scr-puzzle') {
+    if (/^[0-9]$/.test(e.key)) puzzleKey(e.key);
+    else if (e.key === 'Backspace') puzzleKey('del');
+    else if (e.key === 'Enter') puzzleAnswer();
     return;
   }
   if (app.screen === 'scr-game' && !isSpec()) {
@@ -1576,6 +1742,7 @@ async function boot() {
   $('#scr-title').onclick = titleTap;
   $('#btn-single').onclick = goLocalLobby;
   $('#btn-online').onclick = () => { setName(); show('scr-online'); };
+  $('#btn-puzzle').onclick = goPuzzle;
   $('#btn-rule').onclick = showRules;
   $('#btn-create').onclick = createRoom;
   $('#btn-join').onclick = () => joinRoom($('#code-input').value);
@@ -1586,7 +1753,7 @@ async function boot() {
   bindSfx();
   document.body.classList.add('booted');
   goTitle();
-  window.__numer0n = { app, R, director, spectateDemo };
+  window.__numer0n = { app, R, director, spectateDemo, pz };
 }
 
 boot();

@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = {
   winsNeeded: 1,        // 何ゲーム先取
   finalChance: false,   // 先攻が当てたら後攻に最後の1ターン（同時なら引き分け）
   itemMovie: true,      // アイテム使用時にモニターで映像を流す
+  revealButton: true,   // 判定・アイテム結果を「公開ボタン」で公開（人間同士のオンライン対戦）
   startMs: 2200,        // ゲームスタートBGMの長さ(ms)。ホストが開始時に書き込む
   perPlayer: {},        // { uid: { items: [使用可能アイテム] | null, nums: '使用可能な数字' | null } }
 };
@@ -119,6 +120,7 @@ export function sanitizeSettings(raw) {
   s.finalChance = !!s.finalChance;
   s.noHLSlash = !!s.noHLSlash;
   s.itemMovie = s.itemMovie !== false;
+  s.revealButton = s.revealButton !== false;
   const vm = {};
   for (const k of ITEM_ORDER) { const v = Number(s.videoMs && s.videoMs[k]); if (v > 0) vm[k] = Math.min(v, 15000); }
   s.videoMs = vm;
@@ -415,7 +417,7 @@ export function resolvePending(s, uid, pid, result, now) {
   const p = s.pending;
   if (!p || p.id !== pid || p.responder !== uid || p.type === 'declare') return undefined;
   const D = s.settings.digits;
-  if (s.turnDeadline && p.type !== 'call') s.turnDeadline += Math.max(0, now - (p.at || now)) + INFO_MS;
+  if (s.turnDeadline) s.turnDeadline += Math.max(0, now - (p.at || now)) + (p.type !== 'call' ? INFO_MS : 0);
 
   switch (p.type) {
     case 'call': {

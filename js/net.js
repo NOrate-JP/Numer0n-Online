@@ -233,10 +233,10 @@ export class FirebaseStore {
     this.net.m.set(this.net.ref(`secrets/${this.code}/${uid}`), clean(d)).catch((e) => console.warn(e));
   }
   watchSecret(uid, cb) {
-    return this.net.m.onValue(this.net.ref(`secrets/${this.code}/${uid}`), (snap) => cb(snap.val()), () => cb(null));
+    return this.net.m.onValue(this.net.ref(`secrets/${this.code}/${uid}`), (snap) => cb(snap.val()), (err) => { console.warn('secret read denied', err); cb(null, true); });
   }
   watchSecret(uid, cb) {
-    return this.net.m.onValue(this.net.ref(`secrets/${this.code}/${uid}`), (snap) => cb(snap.val()), () => cb(null));
+    return this.net.m.onValue(this.net.ref(`secrets/${this.code}/${uid}`), (snap) => cb(snap.val()), (err) => { console.warn('secret read denied', err); cb(null, true); });
   }
   async loadSecret(uid) {
     const snap = await this.net.m.get(this.net.ref(`secrets/${this.code}/${uid}`));
