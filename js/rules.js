@@ -43,6 +43,7 @@ export const INFO_MS = 3000;
 export const JUDGE_MS = 4200;       // 判定表示の時間（この後ターン交代音→防御タイム→コール可能）        // アイテム結果演出の時間
 export const ITEM_FX_MS = 5900;     // アイテム演出（モニター注目5秒＋カメラ移動）
 export const REVEAL_LIMIT_MS = 30000; // 情報公開ボタンを押さなかった場合の自動公開
+export const EFFECT_LIMIT_MS = 30000; // アイテム効果を決めるまでの制限（映像のあと）
 export const DECLARE_MS = 25000;    // アイテムボタンを押してから宣言するまでの制限
 export const MAX_MEMBERS = 12;      // ルームの最大人数（観戦者含む）
 const INFO_ITEMS = ['highlow', 'slash', 'target', 'double'];
@@ -348,10 +349,6 @@ export function actAttack(s, uid, key, args, now) {
   const def = ITEM_DEFS[key];
   if (!def || def.kind !== 'attack') return undefined;
   if (s.items[uid][key] !== 'unused') return undefined;
-  if (key === 'target') {
-    const d = Number(args && args.digit);
-    if (!(d >= 0 && d <= 9)) return undefined;
-  }
   if (!takeDeclare(s, uid, 'attack', now)) return undefined;
   if (!canAct(s, uid, now) || s.attackUsed || s.itemsLocked) return undefined;
   s.items[uid][key] = 'used';
@@ -359,10 +356,10 @@ export function actAttack(s, uid, key, args, now) {
   s.defenseLocked = true;
   const opp = other(s, uid);
   const e = { type: 'item', by: uid, item: key };
-  if (key === 'target') e.digit = Number(args.digit);
   if (key === 'time') e.sec = s.settings.timeItemSec;
   pushLog(s, e, now);
-  const extra = fxMs(s, key) + INFO_MS;
+  const fx = fxMs(s, key);
+  const extra = fx + INFO_MS;
   s.cooldownUntil = Math.max(s.cooldownUntil, now + extra);
   if (s.turnDeadline) s.turnDeadline += extra;
   switch (key) {
@@ -377,41 +374,63 @@ export function actAttack(s, uid, key, args, now) {
       s.pending = { id: nextId(s), type: key, by: uid, responder: opp, at: now };
       break;
     case 'target':
-      s.pending = { id: nextId(s), type: 'target', by: uid, responder: opp, digit: Number(args.digit), at: now };
+      // 映像のあとで数字を指定する
+      s.pending = { id: nextId(s), type: 'effect', key, by: uid, responder: uid, at: now, from: now + fx, until: now + fx + EFFECT_LIMIT_MS };
       break;
   }
   return s;
 }
 
-/** 防御アイテム。info: change → { pos, hl } */
+/** 防御アイテム：使用（映像）→ そのあとで actEffect で効果を決める */
 export function actDefense(s, uid, key, info, now) {
   s = norm(s);
   const def = ITEM_DEFS[key];
   if (!def || def.kind !== 'defense') return undefined;
   if (s.items[uid][key] !== 'unused') return undefined;
-  if (key === 'change') {
-    const pos = Number(info && info.pos);
-    if (!(pos >= 0 && pos < s.settings.digits) || !info || (info.hl !== 'H' && info.hl !== 'L')) return undefined;
-  }
   if (!takeDeclare(s, uid, 'defense', now)) return undefined;
   if (!canDefend(s, uid, now)) return undefined;
-  const e = { type: 'item', by: uid, item: key };
-  if (key === 'change') {
-    const pos = Number(info && info.pos);
-    if (!(pos >= 0 && pos < s.settings.digits)) return undefined;
-    if (!info || (info.hl !== 'H' && info.hl !== 'L')) return undefined;
-    e.pos = pos; e.hl = info.hl;
-    delete s.reveals[uid][pos];
-  } else {
-    s.reveals[uid] = {};
-  }
   s.items[uid][key] = 'used';
   s.defenseUsed = true;
-  s.secretVer[uid] = (s.secretVer[uid] || 0) + 1;
-  pushLog(s, e, now);
-  // 演出時間ぶん攻撃側の行動を待たせる
-  s.cooldownUntil = Math.max(s.cooldownUntil, now + fxMs(s, key) + INFO_MS);
-  if (s.turnDeadline) s.turnDeadline = Math.max(s.turnDeadline, s.cooldownUntil + 5000);
+  pushLog(s, { type: 'item', by: uid, item: key }, now);
+  const fx = fxMs(s, key);
+  s.pending = { id: nextId(s), type: 'effect', key, by: uid, responder: uid, at: now, from: now + fx, until: now + fx + EFFECT_LIMIT_MS };
+  s.cooldownUntil = Math.max(s.cooldownUntil, now + fx + INFO_MS);
+  return s;
+}
+
+/**
+ * アイテムの効果を決める（映像のあと）
+ *  target: { digit } / shuffle: {} / change: { pos, hl }
+ *  ※ SHUFFLE / CHANGE の新しい番号はクライアント側で secretVer に対応させて保持する
+ */
+export function actEffect(s, uid, args, now) {
+  s = norm(s);
+  const p = s.pending;
+  if (!p || p.type !== 'effect' || p.by !== uid) return undefined;
+  const elapsed = Math.max(0, now - (p.at || now));
+  if (p.key === 'target') {
+    const d = Number(args && args.digit);
+    if (!(d >= 0 && d <= 9)) return undefined;
+    s.pending = { id: nextId(s), type: 'target', by: uid, responder: other(s, uid), digit: d, at: now };
+    // 攻撃側自身の時間なので延長しない（映像ぶんは使用時に延長済み）
+    return s;
+  }
+  if (p.key === 'change') {
+    const pos = Number(args && args.pos);
+    if (!(pos >= 0 && pos < s.settings.digits) || (args.hl !== 'H' && args.hl !== 'L')) return undefined;
+    delete s.reveals[uid][pos];
+    s.pending = null;
+    s.secretVer[uid] = (s.secretVer[uid] || 0) + 1;
+    pushLog(s, { type: 'effect', item: 'change', by: uid, pos, hl: args.hl }, now);
+  } else if (p.key === 'shuffle') {
+    s.reveals[uid] = {};
+    s.pending = null;
+    s.secretVer[uid] = (s.secretVer[uid] || 0) + 1;
+    pushLog(s, { type: 'effect', item: 'shuffle', by: uid }, now);
+  } else return undefined;
+  // 防御側が選んでいる間、攻撃側の時間は止まっていた扱い
+  if (s.turnDeadline) s.turnDeadline += elapsed;
+  s.cooldownUntil = Math.max(s.cooldownUntil, now + INFO_MS);
   return s;
 }
 
@@ -419,7 +438,7 @@ export function actDefense(s, uid, key, info, now) {
 export function resolvePending(s, uid, pid, result, now) {
   s = norm(s);
   const p = s.pending;
-  if (!p || p.id !== pid || p.responder !== uid || p.type === 'declare') return undefined;
+  if (!p || p.id !== pid || p.responder !== uid || p.type === 'declare' || p.type === 'effect') return undefined;
   const D = s.settings.digits;
   if (s.turnDeadline) s.turnDeadline += Math.max(0, now - (p.at || now)) + (p.type !== 'call' ? INFO_MS : 0);
 

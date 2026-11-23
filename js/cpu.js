@@ -86,7 +86,7 @@ export class Knowledge {
           this[t] = this[t].filter((c) => c[e.pos] === e.digit);
           break;
         }
-        case 'item': {
+        case 'effect': {
           const t = mine ? 'oppView' : 'cands'; // e.by の番号が変わった
           if (e.item === 'shuffle') this[t] = shuffleSet(this[t]);
           if (e.item === 'change') this[t] = changeSet(this[t], e.pos, e.hl, mine ? this.myNums : this.oppNums);
@@ -137,6 +137,7 @@ export class CpuAgent {
     const now = this.player.now();
     const p = s.pending;
     if (p && p.type === 'double_choose' && p.responder === this.uid) { this.doDoubleChoose(s, p); return; }
+    if (p && p.type === 'effect' && p.by === this.uid) { this.doEffect(p); return; }
     if (R.canAct(s, this.uid, now)) { this.doTurn(s); return; }
     if (R.canDefend(s, this.uid, now) && this.defTurn !== s.turnNo) { this.doDefense(s); }
   }
@@ -222,7 +223,7 @@ export class CpuAgent {
       }
       if (use && await this.player.declare()) {
         await sleep(1100 + Math.random() * 800);
-        await this.player.attack(use, args);
+        if (await this.player.attack(use)) this.effectPlan = { key: use, args };
         this.busy = false;
         return; // 結果を待ってから再度行動
       }
@@ -270,12 +271,24 @@ export class CpuAgent {
     if (plan.key === 'shuffle') {
       const ps = perms(sec).filter((p) => p !== sec);
       const ns = Math.random() < 0.1 ? sec : rnd(ps);
-      await this.player.defend('shuffle', ns, {});
+      if (await this.player.defend('shuffle')) this.effectPlan = { key: 'shuffle', args: {}, secret: ns };
     } else {
       const d = rnd(R.changeCandidates(sec, plan.pos, this.kn.myNums));
       const ns = sec.slice(0, plan.pos) + d + sec.slice(plan.pos + 1);
-      await this.player.defend('change', ns, { pos: plan.pos, hl: R.hlOf(sec[plan.pos]) });
+      if (await this.player.defend('change')) this.effectPlan = { key: 'change', args: { pos: plan.pos, hl: R.hlOf(sec[plan.pos]) }, secret: ns };
     }
     this.busy = false;
+  }
+
+  /** 映像が終わったらアイテムの効果を決める */
+  async doEffect(p) {
+    if (this._effId === p.id) return;
+    this._effId = p.id;
+    const wait = (p.from || this.player.now()) + 700 + Math.random() * 1200 - this.player.now();
+    await sleep(Math.max(300, wait));
+    const plan = this.effectPlan && this.effectPlan.key === p.key ? this.effectPlan : null;
+    this.effectPlan = null;
+    if (plan) await this.player.effect(plan.args, plan.secret);
+    else this.player.autoEffect();
   }
 }

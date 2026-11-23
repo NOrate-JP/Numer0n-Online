@@ -815,7 +815,7 @@ function knownAboutOpp(s, log) {
     if (e.type === 'target' && e.by === app.view) { if (e.pos >= 0) { info[e.pos].d = String(e.digit); info[e.pos].hl = R.hlOf(e.digit); } else notIn.add(e.digit); }
     if (e.type === 'slash' && e.by === app.view) slash = e.value;
     if (e.type === 'double' && e.by === app.opp) { info[e.pos].d = e.digit; info[e.pos].hl = R.hlOf(e.digit); }
-    if (e.type === 'item' && e.by === app.opp) {
+    if (e.type === 'effect' && e.by === app.opp) {
       if (e.item === 'shuffle') { info.forEach((x) => { x.hl = null; x.d = null; }); }
       if (e.item === 'change') { info[e.pos] = { hl: e.hl, d: null }; }
     }
@@ -833,11 +833,12 @@ function logRows(log, who) {
       callNo++;
       const res = e.eat === 0 && e.bite === 0 ? '<span class="zero">0E 0B</span>' : `<span class="e">${e.eat}<i>EAT</i></span><span class="b">${e.bite}<i>BITE</i></span>`;
       rows.push(`<div class="lrow call ${e.eat === D ? 'hit' : ''}"><span class="no">${callNo}</span><span class="num">${e.num.split('').map((d) => `<i>${d}</i>`).join('')}</span><span class="res">${res}</span></div>`);
+    } else if (e.type === 'effect') {
+      const txt = e.item === 'change' ? `${R.posLabel(e.pos, D)} を交換（${e.hl === 'H' ? 'HIGH' : 'LOW'}）` : '番号を並べ替えた';
+      rows.push(`<div class="lrow litem" style="--ic:${R.ITEM_DEFS[e.item].color}">${itemHTML(e.item, 'xs')}<b>${itemName(e.item)}</b><span>${txt}</span></div>`);
     } else if (e.type === 'item') {
       let txt = '';
-      if (e.item === 'change') txt = `${R.posLabel(e.pos, D)} を交換（${e.hl === 'H' ? 'HIGH' : 'LOW'}）`;
-      else if (e.item === 'shuffle') txt = '番号を並べ替えた';
-      else if (e.item === 'time') txt = `考慮時間 +${e.sec}秒`;
+      if (e.item === 'time') txt = `考慮時間 +${e.sec}秒`;
       else if (e.item === 'double') txt = '2回コール';
       else continue;
       rows.push(`<div class="lrow litem" style="--ic:${R.ITEM_DEFS[e.item].color}">${itemHTML(e.item, 'xs')}<b>${itemName(e.item)}</b><span>${txt}</span></div>`);
@@ -954,6 +955,7 @@ function renderTurnBox() {
     const p = s.pending;
     if (MANUAL_TYPES.includes(p.type) && s.manualReveal) subText = p.responder === app.me ? (p.type === 'call' ? '判定を公開してください' : '公開ボタンを押してください') : `${app.names[p.responder] || ''} が公開するのを待っています…`;
     else if (p.type === 'call') subText = 'JUDGING…';
+    else if (p.type === 'effect') subText = p.by === app.me ? 'アイテムの効果を決めてください' : `${app.names[p.by] || ''} がアイテムの効果を決めています…`;
     else if (p.type === 'declare') subText = p.by === app.me ? 'アイテムを宣言してください' : `${app.names[p.by] || ''} がアイテムを宣言中…`;
     else if (MANUAL_TYPES.includes(p.type) && s.manualReveal) subText = p.responder === app.me ? '公開ボタンを押してください' : `${app.names[p.responder] || ''} が公開するのを待っています…`;
     else if (p.type === 'double_choose') subText = p.responder === app.me ? '開示させる桁を選んでください' : `${app.names[p.responder] || ''} が開示する桁を選んでいます…`;
@@ -1008,13 +1010,18 @@ async function pressItemButton() {
 
 function cancelDeclare() { app.player.cancelDeclare(); }
 
-function declareTimerHTML() { return '<div class="decl-timer"><i></i></div>'; }
+/** 残り時間バー（描画時点の残りで初期化するので、再描画しても満タンに戻らない） */
+function timerBarHTML(p) {
+  const total = p && p.type === 'effect' ? R.EFFECT_LIMIT_MS : R.DECLARE_MS;
+  const w = p && p.until ? Math.max(0, Math.min(100, (p.until - now()) / total * 100)) : 100;
+  return `<div class="decl-timer"><i style="width:${w}%"></i></div>`;
+}
 
 function openItemSelect(side, pid) {
   const s = app.state;
   const list = Object.entries(s.items[app.me] || {}).filter(([k, v]) => v === 'unused' && R.ITEM_DEFS[k].kind === side).map(([k]) => k);
   const body = document.createElement('div');
-  body.innerHTML = `<p class="decl-lead">使用するアイテムを宣言してください</p>${declareTimerHTML()}
+  body.innerHTML = `<p class="decl-lead">使用するアイテムを宣言してください</p>${timerBarHTML(s.pending)}
     <div class="decl-grid">${list.map((k) => `<button class="decl-item" data-k="${k}" style="--ic:${R.ITEM_DEFS[k].color}">${itemHTML(k)}<b>${itemName(k)}</b><small>${R.ITEM_DEFS[k].desc}</small></button>`).join('')}</div>`;
   openModal({
     tag: 'decl' + pid, dismissable: false, cls: 'decl',
@@ -1024,23 +1031,32 @@ function openItemSelect(side, pid) {
   $$('.decl-item', body).forEach((b) => b.onclick = () => {
     sound.play('click');
     const k = b.dataset.k;
-    if (k === 'target') return targetSelect(pid);
-    if (k === 'shuffle') return shuffleModal(pid);
-    if (k === 'change') return changeModal(pid);
     closeModal(true);
-    app.player.attack(k).then((ok) => { if (!ok) toast('使えませんでした'); });
+    // どのアイテムでも：宣言 → 映像 → （映像のあとで）効果
+    (side === 'attack' ? app.player.attack(k) : app.player.defend(k)).then((ok) => { if (!ok) toast('使えませんでした'); });
   });
 }
 
-function targetSelect(pid) {
+/** 映像のあと、自分のアイテムの効果を決める画面を出す */
+function checkEffectPrompt(s) {
+  const p = s.pending;
+  if (!p || p.type !== 'effect' || p.by !== app.me || isSpec()) return;
+  if (director.busy || director.q.length || now() < (p.from || 0) - 300) return;
+  if (modalCtx && modalCtx.tag === 'eff' + p.id) return;
+  if (p.key === 'target') targetSelect(p);
+  else if (p.key === 'shuffle') shuffleModal(p);
+  else if (p.key === 'change') changeModal(p);
+}
+
+function targetSelect(p) {
   const def = R.ITEM_DEFS.target;
   let pick = null;
   const body = document.createElement('div');
-  body.innerHTML = `<p>${def.desc}</p>${declareTimerHTML()}<div class="pick-row">${Array.from({ length: 10 }, (_, d) => `<button class="pick" data-d="${d}">${cardHTML(d)}</button>`).join('')}</div>`;
+  body.innerHTML = `<p>${def.desc}</p>${timerBarHTML(p)}<div class="pick-row">${Array.from({ length: 10 }, (_, d) => `<button class="pick" data-d="${d}">${cardHTML(d)}</button>`).join('')}</div>`;
   openModal({
-    tag: 'decl' + pid, dismissable: false,
+    tag: 'eff' + p.id, dismissable: false,
     title: `<span class="mt-item">${itemHTML('target', 'sm')} TARGET</span>`, body,
-    buttons: [{ label: 'やめる', cls: 'ghost', onClick: cancelDeclare }, { label: '決定', cls: 'primary', id: 'tg-ok', onClick: () => (pick == null ? false : app.player.attack('target', { digit: pick })) }],
+    buttons: [{ label: '決定', cls: 'primary', id: 'tg-ok', onClick: () => (pick == null ? false : app.player.effect({ digit: pick })) }],
   });
   $('#tg-ok').disabled = true;
   $$('.pick', body).forEach((b) => b.onclick = () => {
@@ -1048,12 +1064,12 @@ function targetSelect(pid) {
   });
 }
 
-function shuffleModal(pid) {
+function shuffleModal(p) {
   const sec = app.player.secret; if (!sec) return;
   let arr = sec.split(''); let selIdx = null;
   const body = document.createElement('div');
   const draw = () => {
-    body.innerHTML = `<p>カードを2枚クリックすると入れ替わります。そのまま決定するとフェイント（番号は変わらない）。</p>${declareTimerHTML()}
+    body.innerHTML = `<p>カードを2枚クリックすると入れ替わります。そのまま決定するとフェイント（番号は変わらない）。</p>${timerBarHTML(app.state.pending)}
       <div class="pick-row big">${arr.map((d, i) => `<button class="pick ${selIdx === i ? 'on' : ''}" data-i="${i}">${cardHTML(d)}</button>`).join('')}</div>
       <p class="sub">元の番号：${sec} → 新しい番号：<b>${arr.join('')}</b></p>
       <button class="btn small ghost" id="sh-rand">ランダムに混ぜる</button>`;
@@ -1067,25 +1083,20 @@ function shuffleModal(pid) {
   };
   draw();
   openModal({
-    tag: 'decl' + pid, dismissable: false,
+    tag: 'eff' + p.id, dismissable: false,
     title: `<span class="mt-item">${itemHTML('shuffle', 'sm')} SHUFFLE</span>`, body,
-    buttons: [{ label: 'やめる', cls: 'ghost', onClick: cancelDeclare }, {
-      label: '決定', cls: 'primary', onClick: async () => {
-        const ok = await app.player.defend('shuffle', arr.join(''), {});
-        if (!ok) toast('使えませんでした');
-      },
-    }],
+    buttons: [{ label: '決定', cls: 'primary', onClick: async () => { if (!(await app.player.effect({}, arr.join('')))) toast('処理できませんでした'); } }],
   });
 }
 
-function changeModal(pid) {
+function changeModal(p) {
   const sec = app.player.secret; if (!sec) return;
   const D = sec.length;
   let pos = null, nd = null;
   const body = document.createElement('div');
   const draw = () => {
     const cands = pos != null ? R.changeCandidates(sec, pos, R.allowedNums(app.state.settings, app.me)) : [];
-    body.innerHTML = `<p>① 交換する桁を選ぶ　② 同じ分類（${pos != null ? (R.hlOf(sec[pos]) === 'H' ? 'HIGH：5〜9' : 'LOW：0〜4') : 'HIGH/LOW'}）の数字を選ぶ</p>${declareTimerHTML()}
+    body.innerHTML = `<p>① 交換する桁を選ぶ　② 同じ分類（${pos != null ? (R.hlOf(sec[pos]) === 'H' ? 'HIGH：5〜9' : 'LOW：0〜4') : 'HIGH/LOW'}）の数字を選ぶ</p>${timerBarHTML(app.state.pending)}
       <div class="pick-row big">${sec.split('').map((d, i) => `<button class="pick ${pos === i ? 'on' : ''}" data-p="${i}">${cardHTML(pos === i && nd != null ? nd : d)}<small>${R.posLabel(i, D)}</small></button>`).join('')}</div>
       ${pos != null ? `<div class="pick-row">${cands.length ? cands.map((d) => `<button class="pick ${nd === d ? 'on' : ''}" data-n="${d}">${cardHTML(d)}</button>`).join('') : '<p class="warn">交換できる数字がありません</p>'}</div>` : ''}
       ${pos != null && nd != null ? `<p class="sub">相手には「${R.posLabel(pos, D)}・${R.hlOf(sec[pos]) === 'H' ? 'HIGH' : 'LOW'}」と伝わります。新しい番号：<b>${sec.slice(0, pos) + nd + sec.slice(pos + 1)}</b></p>` : ''}`;
@@ -1094,14 +1105,13 @@ function changeModal(pid) {
     const ok = $('#ch-ok'); if (ok) ok.disabled = pos == null || nd == null;
   };
   openModal({
-    tag: 'decl' + pid, dismissable: false,
+    tag: 'eff' + p.id, dismissable: false,
     title: `<span class="mt-item">${itemHTML('change', 'sm')} CHANGE</span>`, body,
-    buttons: [{ label: 'やめる', cls: 'ghost', onClick: cancelDeclare }, {
+    buttons: [{
       label: '決定', cls: 'primary', id: 'ch-ok', onClick: async () => {
         if (pos == null || nd == null) return false;
         const ns = sec.slice(0, pos) + nd + sec.slice(pos + 1);
-        const ok = await app.player.defend('change', ns, { pos, hl: R.hlOf(sec[pos]) });
-        if (!ok) toast('使えませんでした');
+        if (!(await app.player.effect({ pos, hl: R.hlOf(sec[pos]) }, ns))) toast('処理できませんでした');
       },
     }],
   });
@@ -1119,14 +1129,19 @@ function checkDeclare(s) {
     sound.play('item_press');
     itemPressCut(p.by);
   }
-  // 宣言タイマー表示
-  if (p && p.type === 'declare') {
-    const bar = $('.decl-timer i');
-    if (bar) bar.style.width = Math.max(0, (p.until - now()) / R.DECLARE_MS * 100) + '%';
+  // 宣言・効果選択の残り時間バー
+  if (p && (p.type === 'declare' || p.type === 'effect')) {
+    const total = p.type === 'effect' ? R.EFFECT_LIMIT_MS : R.DECLARE_MS;
+    const w = Math.max(0, Math.min(100, (p.until - now()) / total * 100)) + '%';
+    $$('.decl-timer i').forEach((bar) => { bar.style.width = w; });
   }
   if (modalCtx && modalCtx.tag && modalCtx.tag.startsWith('decl')) {
     if (!p || p.type !== 'declare' || p.by !== app.me) closeModal(true);
   }
+  if (modalCtx && modalCtx.tag && modalCtx.tag.startsWith('eff')) {
+    if (!p || p.type !== 'effect' || 'eff' + p.id !== modalCtx.tag) closeModal(true);
+  }
+  if (s.phase === 'play') checkEffectPrompt(s);
 }
 setInterval(() => { if (app.state && app.screen === 'scr-game') checkDeclare(app.state); }, 250);
 
@@ -1299,6 +1314,16 @@ async function animate(e) {
     case 'finalchance':
       sound.play('start');
       return banner('LAST CHANCE', `${esc(app.names[R.other(s, e.hitter)])} 最後のコール！`, '#f0c040', 2000);
+    case 'effect': {
+      const def = R.ITEM_DEFS[e.item];
+      if (e.item === 'change') {
+        sound.play('item_judge');
+        if (studio) studio.setMonitor({ mode: 'text', big: `${R.posLabel(e.pos, D)} ${e.hl === 'H' ? 'HIGH' : 'LOW'}`, small: 'CHANGE', color: def.color, size: 90 });
+        return infoCut('change', `${whose(e.by)}の${R.posLabel(e.pos, D)}が交換されました`, `<div class="hl big"><i class="${e.hl}">${e.hl === 'H' ? 'HIGH' : 'LOW'}</i></div>`);
+      }
+      if (studio) studio.setMonitor({ mode: 'text', big: 'SHUFFLE', small: `${app.names[e.by]}`, color: def.color });
+      return infoCut('shuffle', `${whose(e.by)}の番号が並べ替えられました`, '<div class="bignum">SHUFFLE</div>');
+    }
     case 'resign':
       return banner('RESIGN', `${name} が降参しました`, '#888', 1500);
     case 'end':
@@ -1432,13 +1457,7 @@ async function animItem(e) {
   });
   if (studio) studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[e.by]}`, color: def.color });
   await sleep(400);
-  // 結果がすぐ出るアイテムはここで表示
-  if (e.item === 'change') {
-    sound.play('item_judge');
-    if (studio) studio.setMonitor({ mode: 'text', big: `${R.posLabel(e.pos, D)} ${e.hl === 'H' ? 'HIGH' : 'LOW'}`, small: 'CHANGE', color: def.color, size: 90 });
-    return infoCut('change', `${whose(e.by)}の${R.posLabel(e.pos, D)}が交換されました`, `<div class="hl big"><i class="${e.hl}">${e.hl === 'H' ? 'HIGH' : 'LOW'}</i></div>`);
-  }
-  if (e.item === 'shuffle') return infoCut('shuffle', `${whose(e.by)}の番号が並べ替えられました`, '<div class="bignum">SHUFFLE</div>');
+  // 効果がすぐ決まるアイテムはここで表示（TARGET / SHUFFLE / CHANGE は映像のあと本人が決める）
   if (e.item === 'time') return infoCut('time', `${whose(e.by)}の考慮時間`, `<div class="bignum">+${e.sec}秒</div>`);
   if (e.item === 'double') return infoCut('double', 'このターン2回コールできます', `<p>${whose(R.other(s, e.by))}が開示させる桁を選びます</p>`);
 }

@@ -78,6 +78,7 @@ export class Player {
     // 公開ボタンを押さないまま放置 → 自動公開
     const p = s.pending;
     if (p && p.responder === this.uid && MANUAL_TYPES.includes(p.type) && now > (p.at || now) + R.REVEAL_LIMIT_MS) this.reveal();
+    if (p && p.type === 'effect' && p.by === this.uid && !this.isCpu && now > p.until) this.autoEffect();
     if (s.pending || !s.turnDeadline) return;
     // 手番側は即座に、相手側は少し待ってからタイムアウト処理（切断対策）
     const grace = s.turn === this.uid ? 0 : 4000;
@@ -158,16 +159,41 @@ export class Player {
     return this.store.update((cur) => R.actAttack(cur, this.uid, key, args || {}, this.now()));
   }
 
-  /** 防御アイテム：newSecret は変更後の番号 */
-  async defend(key, newSecret, info) {
+  /** 防御アイテムを使う（効果は映像のあとで effect() で決める） */
+  async defend(key) {
+    return this.store.update((cur) => R.actDefense(cur, this.uid, key, {}, this.now()));
+  }
+
+  /** アイテムの効果を決める。SHUFFLE / CHANGE は新しい番号も渡す */
+  async effect(args, newSecret) {
     const s = this.state;
     if (!s) return false;
-    const ver = ((s.secretVer && s.secretVer[this.uid]) || 0) + 1;
-    this.secrets[ver] = newSecret;
-    const ok = await this.store.update((cur) => R.actDefense(cur, this.uid, key, info || {}, this.now()));
-    if (!ok) delete this.secrets[ver];
-    else this._persist();
+    let ver = null;
+    if (newSecret) {
+      ver = ((s.secretVer && s.secretVer[this.uid]) || 0) + 1;
+      this.secrets[ver] = newSecret;
+    }
+    const ok = await this.store.update((cur) => R.actEffect(cur, this.uid, args || {}, this.now()));
+    if (ver != null) { if (!ok) delete this.secrets[ver]; else this._persist(); }
     return ok;
+  }
+
+  /** 制限時間内に効果を決めなかった場合の自動処理 */
+  autoEffect() {
+    const s = this.state, p = s && s.pending;
+    if (!p || p.type !== 'effect' || p.by !== this.uid || this._autoEff === p.id) return;
+    this._autoEff = p.id;
+    const sec = this.secret;
+    if (p.key === 'target') return this.effect({ digit: Math.floor(Math.random() * 10) });
+    if (p.key === 'shuffle') return this.effect({}, sec);
+    if (p.key === 'change') {
+      const nums = R.allowedNums(s.settings, this.uid);
+      for (let pos = 0; pos < sec.length; pos++) {
+        const c = R.changeCandidates(sec, pos, nums);
+        if (c.length) return this.effect({ pos, hl: R.hlOf(sec[pos]) }, sec.slice(0, pos) + c[0] + sec.slice(pos + 1));
+      }
+      return this.effect({ pos: 0, hl: R.hlOf(sec[0]) }, sec);
+    }
   }
 
   /** 情報公開ボタン */
@@ -242,7 +268,7 @@ export class Watcher {
     return keys.length ? this.viewSecrets[keys[0]] : null;
   }
   async restoreSecret() {}
-  async declare() { return false; } async cancelDeclare() { return false; }
+  async declare() { return false; } async cancelDeclare() { return false; } async effect() { return false; }
   async call() { return false; } async attack() { return false; } async defend() { return false; }
   async chooseDouble() { return false; } async next() { return false; } async resign() { return false; }
   async setup() { return false; } async unready() { return false; }
