@@ -138,7 +138,7 @@ export class CpuAgent {
     const p = s.pending;
     if (p && p.type === 'double_choose' && p.responder === this.uid) { this.doDoubleChoose(s, p); return; }
     if (R.canAct(s, this.uid, now)) { this.doTurn(s); return; }
-    if (R.canDefend(s, this.uid) && this.defTurn !== s.turnNo) { this.doDefense(s); }
+    if (R.canDefend(s, this.uid, now) && this.defTurn !== s.turnNo) { this.doDefense(s); }
   }
 
   async doSetup(s) {
@@ -245,13 +245,12 @@ export class CpuAgent {
     if (view.length > th) return;
     if (this.level === 'easy' && Math.random() < 0.5) return;
     this.busy = true;
-    // 判定の演出が終わってから数秒あけて使う
-    const lastCall = [...s.log].reverse().find((e) => e.type === 'call');
-    const base = lastCall ? lastCall.t : this.player.now();
-    const wait = base + 6500 + Math.random() * 2000 - this.player.now();
+    // ターン交代（判定表示の後）から少しあけて使う
+    const base = s.turnStartAt || this.player.now();
+    const wait = base + 1500 + Math.random() * 2000 - this.player.now();
     await sleep(Math.max(900, wait));
     const cur = this.player.state;
-    if (!cur || !R.canDefend(cur, this.uid)) { this.busy = false; return; }
+    if (!cur || !R.canDefend(cur, this.uid, this.player.now())) { this.busy = false; return; }
     const sec = this.player.secret;
     const D = cur.settings.digits;
     let plan = null, planSize = view.length * 2 - 1;

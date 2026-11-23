@@ -942,10 +942,14 @@ function renderTurnBox() {
     lbl.textContent = 'READY'; sub.textContent = ''; bar.style.width = '100%'; num.textContent = '';
     box.className = 'turnbox'; return;
   }
+  if (s.turnStartAt && t < s.turnStartAt && !s.pending) {
+    lbl.textContent = 'JUDGE'; sub.textContent = ''; bar.style.width = '100%'; num.textContent = '';
+    box.className = 'turnbox'; return;
+  }
   lbl.textContent = spec ? `${app.names[s.turn] || ''} TURN` : (myTurn ? 'YOUR TURN' : 'OPPONENT TURN');
   box.className = 'turnbox ' + (myTurn ? 'mine' : 'theirs');
   let subText = '';
-  const canDefNow = !spec && R.canDefend(s, app.me) && R.hasUnused(s, app.me, 'defense');
+  const canDefNow = !spec && R.canDefend(s, app.me, t) && R.hasUnused(s, app.me, 'defense');
   if (s.pending) {
     const p = s.pending;
     if (MANUAL_TYPES.includes(p.type) && s.manualReveal) subText = p.responder === app.me ? (p.type === 'call' ? '判定を公開してください' : '公開ボタンを押してください') : `${app.names[p.responder] || ''} が公開するのを待っています…`;
@@ -1226,6 +1230,13 @@ function afterIdle() {
   const s = app.state; if (!s) return;
   checkPendingPrompts();
   if (s.phase === 'gameover') { showResult(); return; }
+  const tStart = s.turnStartAt || s.startAt;
+  if (s.phase === 'play' && director.turnShown !== s.game + ':' + s.turnNo && now() < tStart - 100) {
+    // 判定表示が終わるまで待ってからターン交代
+    clearTimeout(afterIdle._t);
+    afterIdle._t = setTimeout(() => { if (director.idle()) afterIdle(); }, tStart - now());
+    return;
+  }
   if (s.phase === 'play' && director.turnShown !== s.game + ':' + s.turnNo && now() >= s.startAt - 500) {
     director.turnShown = s.game + ':' + s.turnNo;
     const mine = s.turn === app.view;
@@ -1396,14 +1407,14 @@ async function playItemVideo(key, maxMs) {
   // maxMs で打ち切る（映像の途中でもカメラを戻す）
   const v = VIDEO[key];
   sound.attachMedia(v.el);
-  sound.duck(true);
+  sound.pauseBgm();
   try {
     if (studio) { await studio.playVideo(v.el, maxMs); return; }
     // 3D無効時：画面中央に動画を表示
     const box = cutLayer('moviecut'); box.appendChild(v.el);
     await new Promise((res) => { const t = setTimeout(res, maxMs); v.el.onended = () => { clearTimeout(t); res(); }; v.el.currentTime = 0; v.el.play().catch(res); });
     v.el.pause(); box.remove();
-  } finally { sound.duck(false); }
+  } finally { sound.resumeBgm(2); }
 }
 
 /** アイテム：モニターに注目 → 映像（5秒で戻る）→ 効果を処理 */

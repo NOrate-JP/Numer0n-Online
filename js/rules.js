@@ -39,7 +39,8 @@ export const DEFAULT_SETTINGS = {
 
 export const ORDER_MS = 4400;       // 先攻決め演出の時間（このあとゲームスタートBGM）
 export const REVEAL_MS = 4200;      // コール判定演出の最低時間
-export const INFO_MS = 3000;        // アイテム結果演出の時間
+export const INFO_MS = 3000;
+export const JUDGE_MS = 4200;       // 判定表示の時間（この後ターン交代音→防御タイム→コール可能）        // アイテム結果演出の時間
 export const ITEM_FX_MS = 5900;     // アイテム演出（モニター注目5秒＋カメラ移動）
 export const REVEAL_LIMIT_MS = 30000; // 情報公開ボタンを押さなかった場合の自動公開
 export const DECLARE_MS = 25000;    // アイテムボタンを押してから宣言するまでの制限
@@ -188,8 +189,9 @@ export function canAct(s, uid, now) {
   return !!s && s.phase === 'play' && s.turn === uid && !s.pending && now >= s.cooldownUntil - 250;
 }
 
-export function canDefend(s, uid) {
-  return !!s && s.phase === 'play' && s.seats.includes(uid) && s.turn !== uid && !s.pending && !s.defenseLocked && !s.defenseUsed;
+export function canDefend(s, uid, now) {
+  return !!s && s.phase === 'play' && s.seats.includes(uid) && s.turn !== uid && !s.pending && !s.defenseLocked && !s.defenseUsed
+    && (now == null || now >= (s.turnStartAt || 0) - 250);
 }
 
 export function hasUnused(s, uid, kind) {
@@ -200,7 +202,7 @@ export function hasUnused(s, uid, kind) {
 export function declareSide(s, uid, now) {
   if (!s || s.phase !== 'play') return null;
   if (canAct(s, uid, now) && !s.attackUsed && !s.itemsLocked && hasUnused(s, uid, 'attack')) return 'attack';
-  if (canDefend(s, uid) && hasUnused(s, uid, 'defense')) return 'defense';
+  if (canDefend(s, uid, now) && hasUnused(s, uid, 'defense')) return 'defense';
   return null;
 }
 
@@ -288,7 +290,9 @@ function beginTurn(s, uid, base, isFirst) {
   const st = s.settings;
   s.turn = uid;
   s.turnNo = (s.turnNo || 0) + 1;
-  s.cooldownUntil = isFirst ? base : base + Math.max(st.cooldownSec * 1000, REVEAL_MS);
+  // 判定表示 → ターン交代 → 防御タイム → コール可能
+  s.turnStartAt = isFirst ? base : base + JUDGE_MS;
+  s.cooldownUntil = s.turnStartAt + (isFirst ? 0 : st.cooldownSec * 1000);
   s.turnDeadline = st.turnSec > 0 ? s.cooldownUntil + st.turnSec * 1000 : 0;
   s.callsLeft = 1;
   s.attackUsed = false;
@@ -390,7 +394,7 @@ export function actDefense(s, uid, key, info, now) {
     if (!(pos >= 0 && pos < s.settings.digits) || !info || (info.hl !== 'H' && info.hl !== 'L')) return undefined;
   }
   if (!takeDeclare(s, uid, 'defense', now)) return undefined;
-  if (!canDefend(s, uid)) return undefined;
+  if (!canDefend(s, uid, now)) return undefined;
   const e = { type: 'item', by: uid, item: key };
   if (key === 'change') {
     const pos = Number(info && info.pos);

@@ -1,16 +1,16 @@
 // =============================================================
 //  サウンド：Web Audio で効果音・BGMを合成
-//  assets/sounds/<名前>.mp3 を置くと、その音で差し替わる
+//  assets/sounds/<名前>.wav を置くと、その音で差し替わる
 // =============================================================
 
 export const SOUND_NAMES = [
   // 試合中に鳴る音（ユーザー素材で差し替え想定）
-  'bgm_start', 'bgm_game', 'item_press', 'call', 'judge', 'item_judge', 'fanfare',
+  'bgm_start', 'bgm_game', 'item_press', 'call', 'judge', 'item_judge', 'fanfare', 'turn',
   // 試合外（メニュー等）の合成音
   'click', 'hover', 'key', 'title', 'ready', 'shuffle', 'draw', 'bgm_title',
 ];
 /** 試合中はこれ以外鳴らさない */
-const MATCH_SE = ['item_press', 'call', 'judge', 'item_judge', 'fanfare'];
+const MATCH_SE = ['item_press', 'call', 'judge', 'item_judge', 'fanfare', 'turn'];
 const MATCH_BGM = ['bgm_start', 'bgm_game'];
 
 export class Sound {
@@ -58,7 +58,7 @@ export class Sound {
     if (location.protocol === 'file:') return;
     await Promise.all(SOUND_NAMES.map(async (n) => {
       try {
-        const r = await fetch(`assets/sounds/${n}.mp3`, { cache: 'force-cache' });
+        const r = await fetch(`assets/sounds/${n}.wav`, { cache: 'force-cache' });
         if (!r.ok) return;
         const ab = await r.arrayBuffer();
         this.buffers[n] = await this.ctx.decodeAudioData(ab);
@@ -229,6 +229,16 @@ export class Sound {
       src.connect(this.seBus);
       el._snd = true;
     } catch (e) { console.warn('media route failed', e); }
+  }
+  /** 動画再生時：BGMを即停止 → 終わったらフェードで再開 */
+  pauseBgm() {
+    if (!this.ctx) return;
+    const g = this.bgmBus.gain; g.cancelScheduledValues(this.ctx.currentTime); g.setValueAtTime(0, this.ctx.currentTime);
+  }
+  resumeBgm(sec = 2) {
+    if (!this.ctx) return;
+    const g = this.bgmBus.gain, t = this.ctx.currentTime;
+    g.cancelScheduledValues(t); g.setValueAtTime(0.0001, t); g.linearRampToValueAtTime(this.vol.bgm, t + sec);
   }
   duck(on) {
     if (!this.ctx) return;
