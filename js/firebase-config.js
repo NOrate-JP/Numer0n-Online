@@ -5,11 +5,21 @@
 //  ※ databaseURL（Realtime Database のURL）が必須です。
 // =============================================================
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "",
-  appId: ""
+
+  apiKey: "AIzaSyD0uwI3MfKoZCA8FbETiy9Du6N3JLCNDU4",
+
+  authDomain: "numer0n-online.firebaseapp.com",
+
+  databaseURL: "https://numer0n-online-default-rtdb.asia-southeast1.firebasedatabase.app",
+
+  projectId: "numer0n-online",
+
+  storageBucket: "numer0n-online.firebasestorage.app",
+
+  messagingSenderId: "783381363799",
+
+  appId: "1:783381363799:web:08e3ceb39618323a0cb712",
+
+  measurementId: "G-XND9KZC1NV"
+
 };
