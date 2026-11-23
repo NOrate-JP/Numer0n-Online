@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Numer0n ONLINE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=M+PLUS+1p:wght@400;700;800&family=Cinzel:wght@700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="vignette"></div>
+
+<div id="ui">
+  <!-- システムボタン -->
+  <div id="sysbar">
+    <button id="sys-memo" class="sys" title="メモ (M)">✎</button>
+    <button id="sys-sound" class="sys" title="サウンド">♪</button>
+    <button id="sys-full" class="sys" title="フルスクリーン">⛶</button>
+    <div id="vol-pop">
+      <label>MASTER <input type="range" id="vol-master" min="0" max="1" step="0.05"></label>
+      <label>SE <input type="range" id="vol-se" min="0" max="1" step="0.05"></label>
+      <label>BGM <input type="range" id="vol-bgm" min="0" max="1" step="0.05"></label>
+      <label class="chk"><input type="checkbox" id="sys-mute"> ミュート</label>
+    </div>
+  </div>
+
+  <!-- タイトル -->
+  <section id="scr-title" class="screen">
+    <div class="title-wrap">
+      <div id="title-logo" class="logo-text">Numer0n</div>
+      <div class="logo-sub">ONLINE</div>
+    </div>
+    <div class="tap">TAP TO START</div>
+    <div class="credit">ファンメイドの非公式ツールです</div>
+  </section>
+
+  <!-- メニュー -->
+  <section id="scr-menu" class="screen">
+    <div class="menu-top">
+      <div class="menu-logo">Numer0n <small>ONLINE</small></div>
+      <label class="name-box"><span>PLAYER NAME</span><input id="name-input" maxlength="12" autocomplete="off"></label>
+    </div>
+    <div class="menu-tiles">
+      <button class="tile green" id="btn-single"><i class="ti">👤</i><b>シングルプレイ</b><small>SINGLE vs CPU</small></button>
+      <button class="tile green" id="btn-online"><i class="ti">👥</i><b>オンライン対戦</b><small>ONLINE</small></button>
+      <button class="tile purple" id="btn-rule"><i class="ti">📖</i><b>ルール</b><small>RULE</small></button>
+      <button class="tile purple" id="btn-memo"><i class="ti">✎</i><b>メモ</b><small>MEMO</small></button>
+    </div>
+    <button class="btn ghost hidden" id="btn-rejoin">前のルームに戻る <small></small></button>
+  </section>
+
+  <!-- オンライン -->
+  <section id="scr-online" class="screen">
+    <div class="panel online-box">
+      <div class="panel-head">ONLINE BATTLE</div>
+      <button class="btn primary big" id="btn-create">ルームを作る</button>
+      <div class="or">または</div>
+      <div class="join-row"><input id="code-input" placeholder="ROOM CODE" maxlength="5" autocomplete="off"><button class="btn primary" id="btn-join">参加</button></div>
+      <button class="btn ghost" id="btn-online-back">もどる</button>
+    </div>
+  </section>
+
+  <!-- ロビー -->
+  <section id="scr-lobby" class="screen"><div id="lobby"></div></section>
+
+  <!-- 準備 -->
+  <section id="scr-setup" class="screen"><div id="setup"></div></section>
+
+  <!-- ゲーム -->
+  <section id="scr-game" class="screen"><div id="hud"></div></section>
+
+  <div id="cutin"></div>
+  <div id="result"></div>
+  <div id="memo"></div>
+  <div id="modal"></div>
+  <div id="toast"></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
