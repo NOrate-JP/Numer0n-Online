@@ -884,3 +884,21 @@ html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
   #reveal-pane { bottom: 6px; padding: 8px 20px 10px; }
   #puzzle .log { bottom: 6px; }
 }
+
+/* =============================================================
+   v8：リザルトの番号変化履歴
+   ============================================================= */
+.rn-hist { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.nh-head { font-size: 11px; color: var(--dim); margin-bottom: 6px; text-align: left; }
+.nh-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: center; }
+.nh-num { display: inline-flex; gap: 2px; opacity: 0.75; }
+.nh-num.last { opacity: 1; }
+.nh-num i { font-style: normal; font-family: 'Cinzel', serif; font-weight: 900; font-size: 16px; width: 20px; height: 27px; display: grid; place-items: center; background: #f2efe6; color: #111; border-radius: 2px; }
+.nh-num i.chg { box-shadow: 0 0 0 2px #ffd04a; background: #fff6cf; }
+.nh-arrow { display: inline-flex; align-items: center; gap: 3px; font-family: var(--en); font-weight: 700; font-size: 9px; color: var(--ic); filter: brightness(1.5); }
+.nh-arrow small { font-family: var(--jp); font-size: 9px; margin-left: 2px; }
+.nh-arrow i { font-style: normal; font-size: 10px; }
+@media (max-width: 760px) and (orientation: portrait) {
+  .rn-hist { grid-column: 1 / -1; }
+  .nh-row { justify-content: flex-start; }
+}
