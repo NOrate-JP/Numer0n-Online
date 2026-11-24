@@ -902,3 +902,24 @@ html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
   .rn-hist { grid-column: 1 / -1; }
   .nh-row { justify-content: flex-start; }
 }
+
+/* =============================================================
+   v9：アイテムの状態（白黒アイコン想定）
+   active = 効果発動中（白黒反転して光る） / used = 使用済み（暗く） / locked = 使用数の上限
+   ============================================================= */
+.item.used::after { content: none; }
+.item.used, .my-item.used .item { filter: brightness(0.32); }
+.item.locked, .my-item.locked .item { filter: brightness(0.5) grayscale(0.6); }
+.my-item.used span, .my-item.locked span { opacity: 0.45; }
+.item.active { filter: invert(1); animation: itemActive 0.9s ease-in-out infinite alternate; }
+.my-item.active .item { filter: invert(1); }
+.my-item.active span { color: #fff; text-shadow: 0 0 8px var(--ic); }
+@keyframes itemActive { from { box-shadow: 0 0 0 2px #fff, 0 0 10px #fff; } to { box-shadow: 0 0 0 3px #fff, 0 0 24px #fff; } }
+.item.has-img.active { border-radius: 50%; }
+.use-count { font-family: var(--en); font-size: 11px; color: var(--dim); align-self: center; margin-left: 4px; }
+.my-items .use-count { flex-basis: 100%; text-align: center; }
+.bignum.hlc { font-size: 44px; }
+@media (max-width: 760px) and (orientation: portrait) {
+  .my-items .use-count { flex-basis: auto; }
+  .bignum.hlc { font-size: 32px; }
+}

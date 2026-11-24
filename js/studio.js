@@ -22,6 +22,7 @@ export class Studio {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
     this.logoImg = opts.logoImg || null;
+    this.monitorImg = opts.monitorImg || null;   // 待機中にモニターへ映す画像（16:9）
     this.quality = opts.quality || 'mid';
     this.neonMats = [];
     this.clock = new THREE.Clock();
@@ -365,7 +366,7 @@ export class Studio {
     const g = x.createLinearGradient(0, cy - size / 2, 0, cy + size / 2);
     g.addColorStop(0, '#fff8de'); g.addColorStop(0.45, '#d8c38a'); g.addColorStop(0.55, '#8d7a4a'); g.addColorStop(1, '#f2e3b0');
     x.shadowColor = 'rgba(0,0,0,0.8)'; x.shadowBlur = 12; x.shadowOffsetY = 4;
-    x.fillStyle = g; x.fillText('Numer0n', cx, cy);
+    x.fillStyle = g; x.fillText('NUMER0N', cx, cy);
     x.restore();
   }
 
@@ -398,6 +399,15 @@ export class Studio {
 
   _drawMonitor(t) {
     const c = this.monCanvas, x = c.getContext('2d'), W = c.width, H = c.height;
+    // 待機中（ロゴ表示）は用意された画像をそのまま映す
+    if (this.monitorState.mode === 'logo' && this.monitorImg && this.monitorImg.naturalWidth) {
+      if (this._monImgDrawn) return;
+      x.drawImage(this.monitorImg, 0, 0, W, H);
+      this._monImgDrawn = true;
+      this.monTex.needsUpdate = true;
+      return;
+    }
+    this._monImgDrawn = false;
     const bgCol = this.monitorState.color || '#6a1cb0';
     const g = x.createRadialGradient(W / 2, H / 2, 10, W / 2, H / 2, W * 0.7);
     g.addColorStop(0, '#ffffff'); g.addColorStop(0.08, bgCol); g.addColorStop(1, '#0a0420');

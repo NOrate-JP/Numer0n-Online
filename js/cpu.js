@@ -72,7 +72,7 @@ export class Knowledge {
           this[tgt] = this[tgt].filter((c) => { const j = R.judge(c, e.num); return j.eat === e.eat && j.bite === e.bite; });
           break;
         case 'highlow':
-          this[tgt] = this[tgt].filter((c) => R.highLowOf(c) === e.result);
+          this[tgt] = this[tgt].filter((c) => (e.mode === 'v12' ? R.hlOf(c[e.pos]) : e.mode === 'v3' ? R.highLowCount(c) : R.highLowOf(c)) === e.result);
           break;
         case 'slash':
           this[tgt] = this[tgt].filter((c) => R.slashOf(c) === e.value);
@@ -201,7 +201,7 @@ export class CpuAgent {
     this.kn.ingest(cur.log);
     const n = this.kn.cands.length;
     const mine = cur.items[this.uid] || {};
-    const has = (k) => mine[k] === 'unused';
+    const has = (k) => mine[k] === 'unused' && R.usedCount(cur, this.uid) < R.useLimit(cur.settings);
 
     // ---- 攻撃アイテム ----
     if (!cur.attackUsed && !cur.itemsLocked) {
@@ -211,7 +211,14 @@ export class CpuAgent {
       else if (n > 6 && Math.random() < useRate) {
         let best = null, bestScore = n * (this.level === 'hard' ? 0.45 : 0.6);
         const c = this.kn.cands;
-        if (has('highlow')) { const sc = expectedRemain(c, R.highLowOf); if (sc < bestScore) { bestScore = sc; best = ['highlow']; } }
+        if (has('highlow')) {
+          const ver = cur.settings.hlVer;
+          if (ver === 'v12') {
+            for (let pos = 0; pos < cur.settings.digits; pos++) { const sc = expectedRemain(c, (x) => R.hlOf(x[pos])); if (sc < bestScore) { bestScore = sc; best = ['highlow', { pos }]; } }
+          } else {
+            const sc = expectedRemain(c, ver === 'v3' ? R.highLowCount : R.highLowOf); if (sc < bestScore) { bestScore = sc; best = ['highlow']; }
+          }
+        }
         if (has('slash')) { const sc = expectedRemain(c, R.slashOf); if (sc < bestScore) { bestScore = sc; best = ['slash']; } }
         if (has('target')) {
           for (let d = 0; d <= 9; d++) {
@@ -240,6 +247,7 @@ export class CpuAgent {
     this.defTurn = s.turnNo;
     const mine = s.items[this.uid] || {};
     const hasS = mine.shuffle === 'unused', hasC = mine.change === 'unused';
+    if (R.usedCount(s, this.uid) >= R.useLimit(s.settings)) return;
     if (!hasS && !hasC) return;
     const view = this.kn.oppView;
     const th = this.level === 'hard' ? 10 : this.level === 'normal' ? 4 : 2;

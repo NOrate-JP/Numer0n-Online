@@ -31,6 +31,7 @@ const ASSET = {
   video: (k) => `assets/videos/${k}.mp4`,
   memo: 'assets/memo_bg.png',
   logo: 'assets/logo.png',
+  monitor: 'assets/monitor.png',
 };
 const OK = {};     // url -> true/false
 const VIDEO = {};  // item -> { el, ms }
@@ -60,13 +61,15 @@ function probeVideo(k) {
   });
 }
 async function preloadAssets() {
-  const list = [ASSET.back, ASSET.memo, ASSET.logo];
+  const list = [ASSET.back, ASSET.memo, ASSET.logo, ASSET.monitor];
   for (let d = 0; d <= 9; d++) list.push(ASSET.card(d));
   for (const k of R.ITEM_ORDER) list.push(ASSET.item(k));
   const [imgs] = await Promise.all([Promise.all(list.map(probe)), Promise.all(R.ITEM_ORDER.map(probeVideo))]);
+  monitorImg = imgs[3];
   return imgs[2];
 }
 
+let monitorImg = null;
 const ITEM_GLYPH = { double: '×2', highlow: 'H/L', target: '◎', slash: '⟋', time: '⏱', shuffle: 'S', change: '⇄' };
 
 function cardHTML(d, cls = '') {
@@ -325,6 +328,8 @@ const SET_OPTS = {
   cooldownSec: [[0, 'なし'], [3, '3秒'], [5, '5秒'], [10, '10秒']],
   timeItemSec: [[30, '+30秒'], [60, '+60秒'], [120, '+120秒'], [180, '+180秒']],
   winsNeeded: [[1, '1本勝負'], [2, '2本先取'], [3, '3本先取']],
+  useMax: [[-1, '持込数と同じ'], [0, '0個'], [1, '1個'], [2, '2個'], [3, '3個'], [4, '4個'], [5, '5個'], [6, '6個'], [7, '7個']],
+  hlVer: [['v4', '全桁（ver4〜）'], ['v3', 'HIGH/LOWの個数（ver3）'], ['v12', '1桁を指定（ver1-2）']],
 };
 
 function lobbyMembers() {
@@ -354,7 +359,7 @@ function renderLobbyInner() {
   const row = (m, i) => `<div class="pslot ${m.u === app.me ? 'me' : ''}"><div class="pavatar">${m.cpu ? 'CPU' : 'P' + (i + 1)}</div>
     <div class="pname">${esc(m.name)}${m.host ? ' <em>HOST</em>' : ''}${m.u === app.me ? ' <em class="you">YOU</em>' : ''}</div>
     <div class="pstat ${m.online ? 'on' : 'off'}">${m.online ? 'ONLINE' : 'OFFLINE'}</div>${roleBtn(m)}</div>`;
-  const sel = (key) => `<select data-set="${key}" ${host ? '' : 'disabled'}>${SET_OPTS[key].map(([v, l]) => `<option value="${v}" ${+st[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const sel = (key) => `<select data-set="${key}" ${host ? '' : 'disabled'}>${SET_OPTS[key].filter(([v]) => key !== 'useMax' || v <= st.equip).map(([v, l]) => `<option value="${v}" ${String(st[key]) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   const canStart = host && players.length === 2;
   const vids = R.ITEM_ORDER.filter((k) => VIDEO[k]);
   $('#lobby').innerHTML = `
@@ -385,7 +390,9 @@ function renderLobbyInner() {
         <label>勝敗 ${sel('winsNeeded')}</label>
         <label>考慮時間 ${sel('turnSec')}</label>
         <label>防御タイム ${sel('cooldownSec')}</label>
-        <label>最大装備アイテム ${sel('equip')}</label>
+        <label>最大アイテム持込数 ${sel('equip')}</label>
+        <label>最大アイテム使用数 ${sel('useMax')}</label>
+        <label>HIGH&amp;LOWの仕様 ${sel('hlVer')}</label>
         <label>TIME延長 ${sel('timeItemSec')}</label>
       </div>
       <div class="set-sub">使用できるアイテム</div>
@@ -399,7 +406,7 @@ function renderLobbyInner() {
       <div class="detail-row"><button class="btn small ghost" id="btn-detail" ${players.length ? '' : 'disabled'}>詳細設定（プレイヤーごと）</button><span class="detail-sum">${detailSummary(players)}</span></div>
     </div>`;
   bindSfx($('#lobby'));
-  $$('#lobby select[data-set]').forEach((e) => e.onchange = () => { app.settings[e.dataset.set] = +e.value; commitSettings(); });
+  $$('#lobby select[data-set]').forEach((e) => e.onchange = () => { app.settings[e.dataset.set] = e.dataset.set === 'hlVer' ? e.value : +e.value; commitSettings(); });
   $$('#lobby input[data-pool]').forEach((e) => e.onchange = () => { app.settings.pool[e.dataset.pool] = e.checked; commitSettings(); });
   $$('#lobby input[data-flag]').forEach((e) => e.onchange = () => { app.settings[e.dataset.flag] = e.checked; commitSettings(); });
   $$('#lobby [data-role]').forEach((b) => b.onclick = () => app.net.setRole(b.dataset.role, b.dataset.to));
@@ -612,7 +619,7 @@ function renderSetupInner(force) {
   const [p0, p1] = s.seats;
   const headHTML = `<div class="setup-head">
       <div class="game-no">GAME ${s.game}</div>
-      <div class="rule-sum">${D}桁 ／ ${st.winsNeeded === 1 ? '1本勝負' : st.winsNeeded + '本先取'} ／ 考慮${st.turnSec ? st.turnSec + '秒' : '無制限'} ／ アイテム${st.equip}個</div>
+      <div class="rule-sum">${D}桁 ／ ${st.winsNeeded === 1 ? '1本勝負' : st.winsNeeded + '本先取'} ／ 考慮${st.turnSec ? st.turnSec + '秒' : '無制限'} ／ アイテム持込${st.equip}・使用${R.useLimit(st)}</div>
       <div class="score-sum">${esc(app.names[p0])} <b>${s.wins[p0] || 0}</b> - <b>${s.wins[p1] || 0}</b> ${esc(app.names[p1])}</div>
     </div>`;
 
@@ -650,7 +657,7 @@ function renderSetupInner(force) {
             const d = R.ITEM_DEFS[k];
             return `<button class="item-card ${on ? 'on' : ''} ${d.kind}" data-pick="${k}" style="--ic:${d.color}">
               ${itemHTML(k)}<div class="ic-name">${d.name}<small>${d.kind === 'attack' ? '攻撃アイテム' : '防御アイテム'}</small></div>
-              <div class="ic-desc">${d.desc}</div>${on ? `<i class="ic-no">${setupSel.items.indexOf(k) + 1}</i>` : ''}</button>`;
+              <div class="ic-desc">${R.itemDesc(k, st)}</div>${on ? `<i class="ic-no">${setupSel.items.indexOf(k) + 1}</i>` : ''}</button>`;
           }).join('')}
         </div>
         ${conflict ? '<p class="warn">HIGH&amp;LOW と SLASH は同時に装備できません</p>' : ''}
@@ -819,9 +826,13 @@ function renderInput() {
 function knownAboutOpp(s, log) {
   const D = s.settings.digits;
   const info = Array.from({ length: D }, () => ({ hl: null, d: null }));
-  const notIn = new Set(); let slash = null;
+  const notIn = new Set(); let slash = null; let hlCount = null;
   for (const e of log) {
-    if (e.type === 'highlow' && e.by === app.view) e.result.split('').forEach((h, i) => (info[i].hl = h));
+    if (e.type === 'highlow' && e.by === app.view) {
+      if (e.mode === 'v12') info[e.pos].hl = e.result;
+      else if (e.mode === 'v3') hlCount = e.result;
+      else e.result.split('').forEach((h, i) => (info[i].hl = h));
+    }
     if (e.type === 'target' && e.by === app.view) { if (e.pos >= 0) { info[e.pos].d = String(e.digit); info[e.pos].hl = R.hlOf(e.digit); } else notIn.add(e.digit); }
     if (e.type === 'slash' && e.by === app.view) slash = e.value;
     if (e.type === 'double' && e.by === app.opp) { info[e.pos].d = e.digit; info[e.pos].hl = R.hlOf(e.digit); }
@@ -830,7 +841,7 @@ function knownAboutOpp(s, log) {
       if (e.item === 'change') { info[e.pos] = { hl: e.hl, d: null }; }
     }
   }
-  return { info, notIn: [...notIn], slash };
+  return { info, notIn: [...notIn], slash, hlCount };
 }
 
 function logRows(log, who) {
@@ -853,7 +864,7 @@ function logRows(log, who) {
       else continue;
       rows.push(`<div class="lrow litem" style="--ic:${R.ITEM_DEFS[e.item].color}">${itemHTML(e.item, 'xs')}<b>${itemName(e.item)}</b><span>${txt}</span></div>`);
     } else if (e.type === 'highlow') {
-      rows.push(`<div class="lrow litem" style="--ic:${R.ITEM_DEFS.highlow.color}">${itemHTML('highlow', 'xs')}<b>H&amp;L</b><span class="hl">${e.result.split('').map((h) => `<i class="${h}">${h === 'H' ? 'HIGH' : 'LOW'}</i>`).join('')}</span></div>`);
+      rows.push(`<div class="lrow litem" style="--ic:${R.ITEM_DEFS.highlow.color}">${itemHTML('highlow', 'xs')}<b>H&amp;L</b>${hlResultHTML(e, D)}</div>`);
     } else if (e.type === 'slash') {
       rows.push(`<div class="lrow litem" style="--ic:${R.ITEM_DEFS.slash.color}">${itemHTML('slash', 'xs')}<b>SLASH</b><span>スラッシュナンバー <em>${e.value}</em></span></div>`);
     } else if (e.type === 'target') {
@@ -894,10 +905,12 @@ function renderGame() {
   setHTML($('.opp-cards'), k.info.map((x, i) => `<div class="ocard">${finalOpp ? cardHTML(finalOpp[i]) : (x.d != null ? cardHTML(x.d, 'known') : cardHTML(null))}
     ${x.hl && !finalOpp ? `<span class="hlchip ${x.hl}">${x.hl === 'H' ? 'HIGH' : 'LOW'}</span>` : ''}</div>`).join(''));
   const infoChips = [];
+  if (k.hlCount) infoChips.push(`<span class="chip" style="--ic:${R.ITEM_DEFS.highlow.color}">${hlCountText(k.hlCount)}</span>`);
   if (k.slash != null) infoChips.push(`<span class="chip" style="--ic:${R.ITEM_DEFS.slash.color}">SLASH ${k.slash}</span>`);
   if (k.notIn.length) infoChips.push(`<span class="chip" style="--ic:${R.ITEM_DEFS.target.color}">なし: ${k.notIn.join(' ')}</span>`);
   setHTML($('.opp-info'), infoChips.join(''));
-  setHTML($('.opp-items'), Object.entries(s.items[opp] || {}).map(([key, st]) => itemHTML(key, 'sm ' + (st === 'used' && isShownUsed(shown, opp, key) ? 'used' : ''), `title="${itemName(key)}"`)).join(''));
+  const useTxt = (u) => Object.keys(s.items[u] || {}).length ? `<span class="use-count">${Math.min(shown.filter((e) => e.type === 'item' && e.by === u).length, R.useLimit(s.settings))}/${R.useLimit(s.settings)}</span>` : '';
+  setHTML($('.opp-items'), Object.keys(s.items[opp] || {}).map((key) => itemHTML(key, 'sm ' + itemState(s, opp, key), `title="${itemName(key)}"`)).join('') + useTxt(opp));
 
   const sec = app.player && app.player.secret;
   const rev = s.reveals[me] || {};
@@ -905,11 +918,11 @@ function renderGame() {
     : Array.from({ length: s.settings.digits }, () => `<div class="mcard">${cardHTML(null)}</div>`).join(''));
 
   // 自分のアイテム（表示のみ。使うときは ITEM ボタン）
-  setHTML($('.my-items'), Object.entries(s.items[me] || {}).map(([key, st]) => {
+  setHTML($('.my-items'), Object.keys(s.items[me] || {}).map((key) => {
     const def = R.ITEM_DEFS[key];
-    const used = st === 'used' && isShownUsed(shown, me, key);
-    return `<div class="my-item ${def.kind} ${used ? 'used' : ''}" style="--ic:${def.color}">${itemHTML(key, used ? 'used' : '')}<span>${def.name}</span></div>`;
-  }).join(''));
+    const stt = itemState(s, me, key);
+    return `<div class="my-item ${def.kind} ${stt}" style="--ic:${def.color}">${itemHTML(key, stt)}<span>${def.name}</span></div>`;
+  }).join('') + useTxt(me));
 
   const lm = $('.log-me .log-list'), lo = $('.log-opp .log-list');
   if (setHTML(lm, logRows(shown, me))) lm.scrollTop = lm.scrollHeight;
@@ -930,6 +943,38 @@ function bindViewPick(root) {
     app.player.setView(u);
     if (s.phase === 'setup') renderSetup(true);
   });
+}
+
+function hlCountText(r) { const m = /^(\d)H(\d)L$/.exec(r || ''); return m ? `${m[1]}HIGH・${m[2]}LOW` : r; }
+function hlResultHTML(e, D, inner) {
+  let html;
+  if (e.mode === 'v3') html = `<span>${hlCountText(e.result)}</span>`;
+  else if (e.mode === 'v12') html = `${inner ? '' : `<span>${R.posLabel(e.pos, D)}</span>`}<i class="${e.result}">${e.result === 'H' ? 'HIGH' : 'LOW'}</i>`;
+  else html = e.result.split('').map((h) => `<i class="${h}">${h === 'H' ? 'HIGH' : 'LOW'}</i>`).join('');
+  return inner ? html : `<span class="hl">${html}</span>`;
+}
+
+/** アイテムの表示状態：unused / active（効果発動中）/ used / locked（使用数の上限） */
+function itemState(s, uid, key) {
+  const upto = Math.max(director.shownId, director.current || 0);
+  const log = s.log.filter((e) => e.id <= upto);
+  const use = log.find((e) => e.type === 'item' && e.by === uid && e.item === key);
+  if (!use) {
+    const usedShown = log.filter((e) => e.type === 'item' && e.by === uid).length;
+    return usedShown >= R.useLimit(s.settings) ? 'locked' : 'unused';
+  }
+  if (s.phase === 'gameover' && director.idle()) return 'used';
+  const after = log.filter((e) => e.id > use.id);
+  let done = false;
+  if (['highlow', 'slash', 'target'].includes(key)) done = after.some((e) => e.type === key && e.by === uid);
+  else if (key === 'shuffle' || key === 'change') done = after.some((e) => e.type === 'effect' && e.by === uid);
+  else if (key === 'time') done = after.some((e) => (e.type === 'call' && e.by === uid) || e.type === 'timeout');
+  else if (key === 'double') {
+    const r = after.findIndex((e) => e.type === 'double' && e.by === uid);
+    const rest = r >= 0 ? after.slice(r + 1) : [];
+    done = rest.filter((e) => e.type === 'call' && e.by === uid).length >= 2 || rest.some((e) => e.type === 'timeout' || (e.type === 'call' && e.by !== uid));
+  }
+  return done ? 'used' : 'active';
 }
 
 function isShownUsed(shown, uid, key) {
@@ -1032,7 +1077,7 @@ function openItemSelect(side, pid) {
   const list = Object.entries(s.items[app.me] || {}).filter(([k, v]) => v === 'unused' && R.ITEM_DEFS[k].kind === side).map(([k]) => k);
   const body = document.createElement('div');
   body.innerHTML = `<p class="decl-lead">使用するアイテムを宣言してください</p>${timerBarHTML(s.pending)}
-    <div class="decl-grid">${list.map((k) => `<button class="decl-item" data-k="${k}" style="--ic:${R.ITEM_DEFS[k].color}">${itemHTML(k)}<b>${itemName(k)}</b><small>${R.ITEM_DEFS[k].desc}</small></button>`).join('')}</div>`;
+    <div class="decl-grid">${list.map((k) => `<button class="decl-item" data-k="${k}" style="--ic:${R.ITEM_DEFS[k].color}">${itemHTML(k)}<b>${itemName(k)}</b><small>${R.itemDesc(k, s.settings)}</small></button>`).join('')}</div>`;
   openModal({
     tag: 'decl' + pid, dismissable: false, cls: 'decl',
     title: `<span class="decl-title ${side}">ITEM <small>${side === 'attack' ? '攻撃アイテム' : '防御アイテム'}</small></span>`,
@@ -1054,8 +1099,19 @@ function checkEffectPrompt(s) {
   if (director.busy || director.q.length || now() < (p.from || 0) - 300) return;
   if (modalCtx && modalCtx.tag === 'eff' + p.id) return;
   if (p.key === 'target') targetSelect(p);
+  else if (p.key === 'highlow') hlPosSelect(p);
   else if (p.key === 'shuffle') shuffleModal(p);
   else if (p.key === 'change') changeModal(p);
+}
+
+/** HIGH&LOW（ver1-2）：調べる桁を指定 */
+function hlPosSelect(p) {
+  const D = app.state.settings.digits;
+  const body = document.createElement('div');
+  body.innerHTML = `<p>${R.itemDesc('highlow', app.state.settings)}</p>${timerBarHTML(p)}
+    <div class="pick-row big">${Array.from({ length: D }, (_, i) => `<button class="pick" data-pos="${i}">${cardHTML(null)}<small>${R.posLabel(i, D)}</small></button>`).join('')}</div>`;
+  openModal({ tag: 'eff' + p.id, dismissable: false, title: `<span class="mt-item">${itemHTML('highlow', 'sm')} HIGH&amp;LOW</span>`, body, buttons: [] });
+  $$('[data-pos]', body).forEach((b) => b.onclick = () => { sound.play('click'); closeModal(true); app.player.effect({ pos: +b.dataset.pos }); });
 }
 
 function targetSelect(p) {
@@ -1183,7 +1239,7 @@ function renderRevealPane() {
   }
   const key = p.type === 'double_reveal' ? 'double' : p.type;
   const def = R.ITEM_DEFS[key];
-  const what = { highlow: 'あなたの番号の HIGH / LOW', slash: 'あなたのスラッシュナンバー', target: `「${p.digit}」の位置`, double: `あなたの${R.posLabel(p.pos, D)}` }[key];
+  const what = { highlow: p.mode === 'v12' ? `あなたの${R.posLabel(p.pos, D)}の HIGH / LOW` : p.mode === 'v3' ? 'あなたの番号の HIGH・LOW の個数' : 'あなたの番号の HIGH / LOW', slash: 'あなたのスラッシュナンバー', target: `「${p.digit}」の位置`, double: `あなたの${R.posLabel(p.pos, D)}` }[key];
   el = document.createElement('div');
   el.id = 'reveal-pane'; el.dataset.pid = p.id;
   el.style.setProperty('--ic', def.color);
@@ -1240,7 +1296,10 @@ const director = {
     renderGame();
     while (this.q.length) {
       const e = this.q.shift();
+      this.current = e.id;
+      renderGame();
       try { await animate(e); } catch (err) { console.error(err); }
+      this.current = 0;
       if (gen !== this._gen) return;
       this.shownId = Math.max(this.shownId, e.id);
       renderGame();
@@ -1302,9 +1361,11 @@ async function animate(e) {
     case 'item': return animItem(e);
     case 'highlow': {
       sound.play('item_judge');
-      const html = e.result.split('').map((h) => `<i class="${h}">${h === 'H' ? 'HIGH' : 'LOW'}</i>`).join('');
-      if (studio) studio.setMonitor({ mode: 'text', big: e.result.split('').join(' '), small: 'HIGH & LOW', color: R.ITEM_DEFS.highlow.color });
-      return infoCut('highlow', `${whose(R.other(s, e.by))}の番号は…`, `<div class="hl big">${html}</div>`);
+      const big = e.mode === 'v3' ? hlCountText(e.result) : e.mode === 'v12' ? `${R.posLabel(e.pos, D)} ${e.result === 'H' ? 'HIGH' : 'LOW'}` : e.result.split('').join(' ');
+      if (studio) studio.setMonitor({ mode: 'text', big, small: 'HIGH & LOW', color: R.ITEM_DEFS.highlow.color, size: e.mode === 'v4' || !e.mode ? 110 : 80 });
+      const title = e.mode === 'v12' ? `${whose(R.other(s, e.by))}の${R.posLabel(e.pos, D)}は…` : `${whose(R.other(s, e.by))}の番号は…`;
+      const html = e.mode === 'v3' ? `<div class="bignum hlc">${hlCountText(e.result)}</div>` : `<div class="hl big">${hlResultHTML(e, D, true)}</div>`;
+      return infoCut('highlow', title, html);
     }
     case 'slash':
       sound.play('item_judge');
@@ -1593,8 +1654,8 @@ function showRules() {
       <p>例）相手の番号 <b>765</b> に <b>746</b> とコール → 7がEAT、6がBITE → <b>1EAT 1BITE</b></p>
       <p>先に相手の番号を完全に当てた（${st.digits}EAT）プレイヤーの勝利。先攻・後攻はカードを1枚ずつ引き、小さい数字を引いた方が先攻です。</p>
       <h3>アイテム</h3>
-      <p>ゲーム前に<b>${st.equip}個</b>を装備。各アイテムは1ゲーム1回まで。<b>ITEMボタンを押してから、使うアイテムを宣言</b>します。1ターンに攻撃系・防御系をそれぞれ1つまで。</p>
-      <ul>${R.ITEM_ORDER.filter((k) => st.pool[k]).map((k) => `<li class="ri">${itemHTML(k, 'xs')}<b>${itemName(k)}</b>（${R.ITEM_DEFS[k].kind === 'attack' ? '攻撃' : '防御'}）${R.ITEM_DEFS[k].desc}</li>`).join('')}</ul>
+      <p>ゲーム前に<b>${st.equip}個</b>まで持ち込み、試合中はそのうち<b>${R.useLimit(st)}個</b>まで使用できます。各アイテムは1ゲーム1回まで。<b>ITEMボタンを押してから、使うアイテムを宣言</b>します。1ターンに攻撃系・防御系をそれぞれ1つまで。</p>
+      <ul>${R.ITEM_ORDER.filter((k) => st.pool[k]).map((k) => `<li class="ri">${itemHTML(k, 'xs')}<b>${itemName(k)}</b>（${R.ITEM_DEFS[k].kind === 'attack' ? '攻撃' : '防御'}）${R.itemDesc(k, st)}</li>`).join('')}</ul>
       <p>・攻撃系は自分のターン、コールの前に使用。<br>・防御系は<b>相手のターン</b>、相手がコールや攻撃アイテムを使う前に使用。<br>・相手のジャッジ後${st.cooldownSec ? `<b>${st.cooldownSec}秒間</b>` : ''}は防御タイム（攻撃側は行動できない）。</p>
       <h3>操作</h3>
       <p>数字キー：入力　Enter：コール　Backspace：1文字消す　I：ITEM　M：メモ</p>
@@ -1790,7 +1851,7 @@ async function boot() {
   if (logoImg) { $('#title-logo').innerHTML = `<img src="${ASSET.logo}" alt="Numer0n">`; }
   try {
     const { Studio } = await import('./studio.js');
-    studio = new Studio($('#stage'), { logoImg, quality: app.quality });
+    studio = new Studio($('#stage'), { logoImg, monitorImg, quality: app.quality });
   } catch (e) {
     console.warn('3D studio unavailable', e);
     document.body.classList.add('no3d');

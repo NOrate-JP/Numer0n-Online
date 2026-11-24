@@ -103,7 +103,7 @@ export class Player {
     let result;
     switch (p.type) {
       case 'call': result = R.judge(sec, p.num); break;
-      case 'highlow': result = R.highLowOf(sec); break;
+      case 'highlow': result = p.mode === 'v12' ? R.hlOf(sec[p.pos]) : p.mode === 'v3' ? R.highLowCount(sec) : R.highLowOf(sec); break;
       case 'slash': result = R.slashOf(sec); break;
       case 'target': result = R.targetOf(sec, p.digit); break;
       case 'double_reveal': result = sec[p.pos]; break;
@@ -188,6 +188,7 @@ export class Player {
     this._autoEff = p.id;
     const sec = this.secret;
     if (p.key === 'target') return this.effect({ digit: Math.floor(Math.random() * 10) });
+    if (p.key === 'highlow') return this.effect({ pos: Math.floor(Math.random() * s.settings.digits) });
     if (p.key === 'shuffle') return this.effect({}, sec);
     if (p.key === 'change') {
       const nums = R.allowedNums(s.settings, this.uid);

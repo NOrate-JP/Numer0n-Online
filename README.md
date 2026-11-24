@@ -35,8 +35,9 @@ assets/               画像・音（下記）
 |---|---|
 | `assets/cards/0.png` 〜 `9.png` | 数字カード（縦横比 5:7 推奨。例 500×700） |
 | `assets/cards/back.png` | カード裏面（5:7） |
-| `assets/items/double.png` `highlow.png` `target.png` `slash.png` `time.png` `shuffle.png` `change.png` | アイテムアイコン（正方形・透過PNG推奨） |
+| `assets/items/double.png` `highlow.png` `target.png` `slash.png` `time.png` `shuffle.png` `change.png` | アイテムアイコン（正方形・白黒推奨。効果発動中は白黒反転、使用後は暗く表示） |
 | `assets/memo_bg.png` | メモの背景（2560×1440） |
+| `assets/monitor.png` | スタジオのモニターに待機中に映す画像（16:9、例 1920×1080） |
 | `assets/logo.png` | タイトルロゴ（任意・透過PNG。スタジオのモニターにも表示） |
 | `assets/videos/double.mp4` など | アイテム映像（任意・音声込みOK）。再生開始でBGMが止まり、終了後にフェードで再開。使用時にモニターで再生され、5秒でカメラが戻ります（映像の途中でも打ち切り）。ファイル名はアイテム画像と同じ（double / highlow / target / slash / time / shuffle / change）。H.264のmp4推奨、1本10MB程度まで |
 | `assets/sounds/*.wav` | 効果音の差し替え（任意。下の名前で置くと合成音の代わりに鳴る） |

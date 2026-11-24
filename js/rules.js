@@ -23,7 +23,9 @@ export const ITEM_ORDER = ['double', 'highlow', 'target', 'slash', 'time', 'shuf
 
 export const DEFAULT_SETTINGS = {
   digits: 3,            // 桁数 3/4/5
-  equip: 3,             // 装備できるアイテム数
+  equip: 3,             // 最大アイテム持込数
+  useMax: -1,           // 最大アイテム使用数（-1 = 持込数と同じ）
+  hlVer: 'v4',          // HIGH&LOWの仕様：v12=1桁指定 / v3=HIGH・LOWの個数 / v4=全桁（現行）
   pool: { double: true, highlow: true, target: true, slash: true, time: true, shuffle: true, change: true },
   noHLSlash: false,     // HIGH&LOW と SLASH の同時装備禁止（第11回ルール）
   turnSec: 90,          // 考慮時間（0 = 無制限）
@@ -84,6 +86,23 @@ export function slashOf(num) {
   return Math.max(...ds) - Math.min(...ds);
 }
 
+/** HIGH&LOW ver3：HIGH・LOWの個数（例 "2H1L"） */
+export function highLowCount(num) {
+  const h = num.split('').filter((d) => hlOf(d) === 'H').length;
+  return `${h}H${num.length - h}L`;
+}
+/** 使用できるアイテム数の上限 */
+export function useLimit(st) { return st.useMax < 0 ? st.equip : st.useMax; }
+export function usedCount(s, uid) { return Object.values((s.items && s.items[uid]) || {}).filter((v) => v === 'used').length; }
+/** 設定に応じたアイテム説明 */
+export function itemDesc(key, st) {
+  if (key === 'highlow' && st) {
+    if (st.hlVer === 'v12') return '相手の番号の桁を1つ指定し、その数字が HIGH(5〜9) か LOW(0〜4) かを知ることができる。';
+    if (st.hlVer === 'v3') return '相手の番号に HIGH(5〜9)・LOW(0〜4) の数字がそれぞれいくつ含まれているかを知る（桁の指定はできない）。';
+  }
+  return ITEM_DEFS[key].desc;
+}
+
 export function highLowOf(num) {
   return num.split('').map(hlOf).join('');
 }
@@ -121,6 +140,8 @@ export function sanitizeSettings(raw) {
   s.winsNeeded = Math.max(1, Math.min(5, +s.winsNeeded || 1));
   s.finalChance = !!s.finalChance;
   s.noHLSlash = !!s.noHLSlash;
+  s.useMax = Number.isFinite(+s.useMax) ? Math.max(-1, Math.min(+s.useMax, s.equip)) : -1;
+  s.hlVer = ['v12', 'v3', 'v4'].includes(s.hlVer) ? s.hlVer : 'v4';
   s.itemMovie = s.itemMovie !== false;
   s.revealButton = s.revealButton !== false;
   const vm = {};
@@ -196,6 +217,7 @@ export function canDefend(s, uid, now) {
 }
 
 export function hasUnused(s, uid, kind) {
+  if (s.settings && usedCount(s, uid) >= useLimit(s.settings)) return false;   // 使用数の上限
   return Object.entries((s.items && s.items[uid]) || {}).some(([k, v]) => v === 'unused' && ITEM_DEFS[k] && ITEM_DEFS[k].kind === kind);
 }
 
@@ -352,6 +374,7 @@ export function actAttack(s, uid, key, args, now) {
   const def = ITEM_DEFS[key];
   if (!def || def.kind !== 'attack') return undefined;
   if (s.items[uid][key] !== 'unused') return undefined;
+  if (usedCount(s, uid) >= useLimit(s.settings)) return undefined;
   if (!takeDeclare(s, uid, 'attack', now)) return undefined;
   if (!canAct(s, uid, now) || s.attackUsed || s.itemsLocked) return undefined;
   s.items[uid][key] = 'used';
@@ -373,6 +396,13 @@ export function actAttack(s, uid, key, args, now) {
       s.pending = { id: nextId(s), type: 'double_choose', by: uid, responder: opp, at: now };
       break;
     case 'highlow':
+      if (s.settings.hlVer === 'v12') {
+        // 映像のあとで桁を指定する
+        s.pending = { id: nextId(s), type: 'effect', key, by: uid, responder: uid, at: now, from: now + fx, until: now + fx + EFFECT_LIMIT_MS };
+      } else {
+        s.pending = { id: nextId(s), type: key, by: uid, responder: opp, at: now, mode: s.settings.hlVer };
+      }
+      break;
     case 'slash':
       s.pending = { id: nextId(s), type: key, by: uid, responder: opp, at: now };
       break;
@@ -390,6 +420,7 @@ export function actDefense(s, uid, key, info, now) {
   const def = ITEM_DEFS[key];
   if (!def || def.kind !== 'defense') return undefined;
   if (s.items[uid][key] !== 'unused') return undefined;
+  if (usedCount(s, uid) >= useLimit(s.settings)) return undefined;
   if (!takeDeclare(s, uid, 'defense', now)) return undefined;
   if (!canDefend(s, uid, now)) return undefined;
   s.items[uid][key] = 'used';
@@ -411,6 +442,12 @@ export function actEffect(s, uid, args, now) {
   const p = s.pending;
   if (!p || p.type !== 'effect' || p.by !== uid) return undefined;
   const elapsed = Math.max(0, now - (p.at || now));
+  if (p.key === 'highlow') {
+    const pos = Number(args && args.pos);
+    if (!(pos >= 0 && pos < s.settings.digits)) return undefined;
+    s.pending = { id: nextId(s), type: 'highlow', by: uid, responder: other(s, uid), mode: 'v12', pos, at: now };
+    return s;
+  }
   if (p.key === 'target') {
     const d = Number(args && args.digit);
     if (!(d >= 0 && d <= 9)) return undefined;
@@ -462,7 +499,7 @@ export function resolvePending(s, uid, pid, result, now) {
     }
     case 'highlow':
       s.pending = null;
-      pushLog(s, { type: 'highlow', by: p.by, result: String(result) }, now);
+      pushLog(s, { type: 'highlow', by: p.by, result: String(result), mode: p.mode || 'v4', pos: p.pos != null ? p.pos : -1 }, now);
       break;
     case 'slash':
       s.pending = null;
