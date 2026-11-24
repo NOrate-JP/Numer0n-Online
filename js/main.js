@@ -32,7 +32,9 @@ const ASSET = {
   memo: 'assets/memo_bg.png',
   logo: 'assets/logo.png',
   monitor: 'assets/monitor.png',
+  itemMon: (k) => `assets/monitor_items/${k}.png`,   // アイテム効果中にモニターへ映す画像（16:9）
 };
+const ITEM_MON = {}; // key -> Image
 const OK = {};     // url -> true/false
 const VIDEO = {};  // item -> { el, ms }
 function probe(url) {
@@ -64,7 +66,8 @@ async function preloadAssets() {
   const list = [ASSET.back, ASSET.memo, ASSET.logo, ASSET.monitor];
   for (let d = 0; d <= 9; d++) list.push(ASSET.card(d));
   for (const k of R.ITEM_ORDER) list.push(ASSET.item(k));
-  const [imgs] = await Promise.all([Promise.all(list.map(probe)), Promise.all(R.ITEM_ORDER.map(probeVideo))]);
+  const [imgs] = await Promise.all([Promise.all(list.map(probe)), Promise.all(R.ITEM_ORDER.map(probeVideo)),
+    Promise.all(R.ITEM_ORDER.map((k) => probe(ASSET.itemMon(k)).then((im) => { if (im) ITEM_MON[k] = im; })))]);
   monitorImg = imgs[3];
   return imgs[2];
 }
@@ -945,6 +948,21 @@ function bindViewPick(root) {
   });
 }
 
+/** モニターの通常表示：効果中のアイテムがあればその画像、なければ待機画像 */
+function updateMonitorBase() {
+  const s = app.state;
+  if (!studio || !s || s.phase !== 'play' || studio.video) return;
+  let active = null;
+  for (const e of s.log) {
+    if (e.type !== 'item' || e.id > director.shownId) continue;
+    if (itemState(s, e.by, e.item) === 'active') active = e;   // いちばん新しい効果中のアイテム
+  }
+  if (!active) { studio.setMonitor({ mode: 'logo' }); return; }
+  const def = R.ITEM_DEFS[active.item];
+  if (ITEM_MON[active.item]) studio.setMonitor({ mode: 'image', img: ITEM_MON[active.item] });
+  else studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[active.by] || ''} 効果中`, color: def.color });
+}
+
 function hlCountText(r) { const m = /^(\d)H(\d)L$/.exec(r || ''); return m ? `${m[1]}HIGH・${m[2]}LOW` : r; }
 function hlResultHTML(e, D, inner) {
   let html;
@@ -1302,6 +1320,7 @@ const director = {
       this.current = 0;
       if (gen !== this._gen) return;
       this.shownId = Math.max(this.shownId, e.id);
+      updateMonitorBase();
       renderGame();
     }
     this.busy = false;
@@ -1514,7 +1533,7 @@ async function playItemVideo(key, maxMs) {
 }
 
 /** アイテム：モニターに注目 → 映像（5秒で戻る）→ 効果を処理 */
-const FOCUS_MS = 5000;
+const FOCUS_MS = 6000;
 async function animItem(e) {
   const def = R.ITEM_DEFS[e.item];
   const s = app.state;
@@ -1526,7 +1545,8 @@ async function animItem(e) {
     if (video) await playItemVideo(e.item, FOCUS_MS);
     else await sleep(FOCUS_MS);
   });
-  if (studio) studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[e.by]}`, color: def.color });
+  // 映像のあとは、効果が切れるまでアイテム用の画像をモニターに映す
+  if (studio) studio.setMonitor(ITEM_MON[e.item] ? { mode: 'image', img: ITEM_MON[e.item] } : { mode: 'text', big: def.name, small: `${app.names[e.by]} 効果中`, color: def.color });
   await sleep(400);
   // 効果がすぐ決まるアイテムはここで表示（TARGET / SHUFFLE / CHANGE は映像のあと本人が決める）
   if (e.item === 'time') return infoCut('time', `${whose(e.by)}の考慮時間`, `<div class="bignum">+${e.sec}秒</div>`);

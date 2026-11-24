@@ -361,12 +361,19 @@ export class Studio {
       return;
     }
     x.save();
-    x.font = `900 ${size}px "Playfair Display", "Times New Roman", serif`;
-    x.textAlign = 'center'; x.textBaseline = 'middle';
+    // 「0」は小文字のoに見えないよう、高さのある数字のフォントで描く
+    const fText = `900 ${size}px "Playfair Display", "Times New Roman", serif`;
+    const fZero = `900 ${size * 0.98}px Cinzel, "Times New Roman", serif`;
+    const parts = [['Numer', fText], ['0', fZero], ['n', fText]];
+    let total = 0;
+    for (const [t, f] of parts) { x.font = f; total += x.measureText(t).width; }
+    x.textAlign = 'left'; x.textBaseline = 'alphabetic';
     const g = x.createLinearGradient(0, cy - size / 2, 0, cy + size / 2);
     g.addColorStop(0, '#fff8de'); g.addColorStop(0.45, '#d8c38a'); g.addColorStop(0.55, '#8d7a4a'); g.addColorStop(1, '#f2e3b0');
     x.shadowColor = 'rgba(0,0,0,0.8)'; x.shadowBlur = 12; x.shadowOffsetY = 4;
-    x.fillStyle = g; x.fillText('Numer0n', cx, cy);
+    x.fillStyle = g;
+    let px = cx - total / 2; const base = cy + size * 0.35;
+    for (const [t, f] of parts) { x.font = f; x.fillText(t, px, base); px += x.measureText(t).width; }
     x.restore();
   }
 
@@ -399,11 +406,20 @@ export class Studio {
 
   _drawMonitor(t) {
     const c = this.monCanvas, x = c.getContext('2d'), W = c.width, H = c.height;
+    // 画像表示（アイテム効果中の画像など）
+    const img = this.monitorState.mode === 'image' ? this.monitorState.img : null;
+    if (img && img.naturalWidth) {
+      if (this._monImgDrawn === img) return;
+      x.drawImage(img, 0, 0, W, H);
+      this._monImgDrawn = img;
+      this.monTex.needsUpdate = true;
+      return;
+    }
     // 待機中（ロゴ表示）は用意された画像をそのまま映す
     if (this.monitorState.mode === 'logo' && this.monitorImg && this.monitorImg.naturalWidth) {
-      if (this._monImgDrawn) return;
+      if (this._monImgDrawn === this.monitorImg) return;
       x.drawImage(this.monitorImg, 0, 0, W, H);
-      this._monImgDrawn = true;
+      this._monImgDrawn = this.monitorImg;
       this.monTex.needsUpdate = true;
       return;
     }
@@ -421,7 +437,14 @@ export class Studio {
   // ---------------------------------------------------------
   //  公開API
   // ---------------------------------------------------------
-  setMonitor(st) { this.monitorState = Object.assign({ mode: 'logo' }, st || {}); this._renderMonitorContent(); if (!this.video) this._drawMonitor(this.clock.elapsedTime); }
+  setMonitor(st) {
+    const next = Object.assign({ mode: 'logo' }, st || {});
+    // 同じ画像・同じ待機表示なら描き直さない
+    const cur = this.monitorState;
+    if (cur && next.mode === cur.mode && (next.mode === 'logo' || (next.mode === 'image' && next.img === cur.img))) return;
+    this.monitorState = next; this._monImgDrawn = null;
+    this._renderMonitorContent(); if (!this.video) this._drawMonitor(this.clock.elapsedTime);
+  }
   setConsole(text) { this._drawConsole(text); }
   setFrozen(f) { this.frozen = !!f; }
 
