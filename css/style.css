@@ -923,3 +923,6 @@ html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
   .my-items .use-count { flex-basis: auto; }
   .bignum.hlc { font-size: 32px; }
 }
+
+/* タイトルロゴ：小文字のあるフォントで「Numer0n」 */
+.logo-text, .menu-logo { font-family: 'Playfair Display', 'Times New Roman', serif; font-weight: 900; letter-spacing: 0.01em; }

@@ -361,12 +361,12 @@ export class Studio {
       return;
     }
     x.save();
-    x.font = `700 ${size}px Cinzel, "Times New Roman", serif`;
+    x.font = `900 ${size}px "Playfair Display", "Times New Roman", serif`;
     x.textAlign = 'center'; x.textBaseline = 'middle';
     const g = x.createLinearGradient(0, cy - size / 2, 0, cy + size / 2);
     g.addColorStop(0, '#fff8de'); g.addColorStop(0.45, '#d8c38a'); g.addColorStop(0.55, '#8d7a4a'); g.addColorStop(1, '#f2e3b0');
     x.shadowColor = 'rgba(0,0,0,0.8)'; x.shadowBlur = 12; x.shadowOffsetY = 4;
-    x.fillStyle = g; x.fillText('NUMER0N', cx, cy);
+    x.fillStyle = g; x.fillText('Numer0n', cx, cy);
     x.restore();
   }
 
