@@ -1381,22 +1381,18 @@ async function animate(e) {
     case 'highlow': {
       sound.play('item_judge');
       const big = e.mode === 'v3' ? hlCountText(e.result) : e.mode === 'v12' ? `${R.posLabel(e.pos, D)} ${e.result === 'H' ? 'HIGH' : 'LOW'}` : e.result.split('').join(' ');
-      if (studio) studio.setMonitor({ mode: 'text', big, small: 'HIGH & LOW', color: R.ITEM_DEFS.highlow.color, size: e.mode === 'v4' || !e.mode ? 110 : 80 });
       const title = e.mode === 'v12' ? `${whose(R.other(s, e.by))}の${R.posLabel(e.pos, D)}は…` : `${whose(R.other(s, e.by))}の番号は…`;
       const html = e.mode === 'v3' ? `<div class="bignum hlc">${hlCountText(e.result)}</div>` : `<div class="hl big">${hlResultHTML(e, D, true)}</div>`;
       return infoCut('highlow', title, html);
     }
     case 'slash':
       sound.play('item_judge');
-      if (studio) studio.setMonitor({ mode: 'text', big: String(e.value), small: 'SLASH NUMBER', color: R.ITEM_DEFS.slash.color });
       return infoCut('slash', `${whose(R.other(s, e.by))}のスラッシュナンバーは`, `<div class="bignum">${e.value}</div>`);
     case 'target':
       sound.play('item_judge');
-      if (studio) studio.setMonitor({ mode: 'text', big: `${e.digit} → ${e.pos >= 0 ? R.posLabel(e.pos, D) : 'NONE'}`, small: 'TARGET', color: R.ITEM_DEFS.target.color, size: 90 });
       return infoCut('target', `「${e.digit}」は${whose(R.other(s, e.by))}の番号に…`, e.pos >= 0 ? `<div class="bignum">${R.posLabel(e.pos, D)}</div>` : `<div class="bignum none">ありません</div>`);
     case 'double':
       sound.play('item_judge');
-      if (studio) studio.setMonitor({ mode: 'text', big: `${R.posLabel(e.pos, D)} = ${e.digit}`, small: `${app.names[e.by]} の番号を開示`, color: R.ITEM_DEFS.double.color, size: 90 });
       return infoCut('double', `${whose(e.by)}の${R.posLabel(e.pos, D)}を開示`, `<div class="reveal-card">${cardHTML(e.digit)}</div><p>このターン、2回コールできます</p>`);
     case 'timeout':
       sound.play('timeup');
@@ -1408,10 +1404,8 @@ async function animate(e) {
       const def = R.ITEM_DEFS[e.item];
       if (e.item === 'change') {
         sound.play('item_judge');
-        if (studio) studio.setMonitor({ mode: 'text', big: `${R.posLabel(e.pos, D)} ${e.hl === 'H' ? 'HIGH' : 'LOW'}`, small: 'CHANGE', color: def.color, size: 90 });
         return infoCut('change', `${whose(e.by)}の${R.posLabel(e.pos, D)}が交換されました`, `<div class="hl big"><i class="${e.hl}">${e.hl === 'H' ? 'HIGH' : 'LOW'}</i></div>`);
       }
-      if (studio) studio.setMonitor({ mode: 'text', big: 'SHUFFLE', small: `${app.names[e.by]}`, color: def.color });
       return infoCut('shuffle', `${whose(e.by)}の番号が並べ替えられました`, '<div class="bignum">SHUFFLE</div>');
     }
     case 'resign':
@@ -1518,18 +1512,31 @@ async function focusMonitor(fn) {
   }
 }
 
+/** アイテム映像：すぐ再生し、maxMs でカメラを戻す。途中で止める場合は音をフェードアウト */
 async function playItemVideo(key, maxMs) {
-  // maxMs で打ち切る（映像の途中でもカメラを戻す）
   const v = VIDEO[key];
   sound.attachMedia(v.el);
+  sound.mediaVolume(v.el, 1);
   sound.pauseBgm();
-  try {
-    if (studio) { await studio.playVideo(v.el, maxMs); return; }
-    // 3D無効時：画面中央に動画を表示
-    const box = cutLayer('moviecut'); box.appendChild(v.el);
-    await new Promise((res) => { const t = setTimeout(res, maxMs); v.el.onended = () => { clearTimeout(t); res(); }; v.el.currentTime = 0; v.el.play().catch(res); });
-    v.el.pause(); box.remove();
-  } finally { sound.resumeBgm(2); }
+  let ended = false;
+  const FADE = 0.9;
+  if (studio) {
+    const done = studio.playVideo(v.el, maxMs + FADE * 1000 + 300).then(() => { ended = true; });
+    await Promise.race([done, sleep(maxMs)]);
+    if (!ended) {
+      // ぶつ切りにしないよう、映像はそのまま流しつつ音を下げてから止める
+      sound.mediaVolume(v.el, 0, FADE);
+      setTimeout(() => { if (studio.video && studio.video.el === v.el) studio.stopVideo(); }, FADE * 1000 + 50);
+    }
+    sound.resumeBgm(2);
+    return;
+  }
+  // 3D無効時：画面中央に動画を表示
+  const box = cutLayer('moviecut'); box.appendChild(v.el);
+  await new Promise((res) => { const t = setTimeout(res, maxMs); v.el.onended = () => { clearTimeout(t); res(); }; v.el.currentTime = 0; v.el.play().catch(res); });
+  sound.mediaVolume(v.el, 0, FADE);
+  setTimeout(() => { v.el.pause(); box.remove(); }, FADE * 1000 + 50);
+  sound.resumeBgm(2);
 }
 
 /** アイテム：モニターに注目 → 映像（5秒で戻る）→ 効果を処理 */
@@ -1539,14 +1546,22 @@ async function animItem(e) {
   const s = app.state;
   const D = s.settings.digits;
   const video = s.settings.itemMovie && VIDEO[e.item];
-  if (studio) { studio.flash(def.color, 2.2); studio.setMonitor({ mode: 'text', big: def.name, small: `${app.names[e.by]} が使用`, color: def.color }); }
+  const itemMon = ITEM_MON[e.item] ? { mode: 'image', img: ITEM_MON[e.item] } : { mode: 'text', big: def.name, small: `${app.names[e.by]} 効果中`, color: def.color };
+  if (studio) {
+    studio.flash(def.color, 2.2);
+    // 映像があれば即座に再生（直前に別の表示を挟まない）。無ければアイテム画像を表示
+    if (!video) studio.setMonitor(itemMon);
+  }
   await focusMonitor(async () => {
-    await sleep(500); // カメラ移動
-    if (video) await playItemVideo(e.item, FOCUS_MS);
-    else await sleep(FOCUS_MS);
+    if (video) {
+      const pv = playItemVideo(e.item, FOCUS_MS);
+      // 映像が終わった瞬間（短い映像でも）にアイテム画像へ切り替わるよう、次の表示を先に設定
+      if (studio) studio.setMonitor(itemMon);
+      await pv;
+    } else await sleep(FOCUS_MS);
   });
-  // 映像のあとは、効果が切れるまでアイテム用の画像をモニターに映す
-  if (studio) studio.setMonitor(ITEM_MON[e.item] ? { mode: 'image', img: ITEM_MON[e.item] } : { mode: 'text', big: def.name, small: `${app.names[e.by]} 効果中`, color: def.color });
+  // 映像のあとは、効果が切れるまでアイテム用の画像をモニターに映す（結果表示中も）
+  if (studio) studio.setMonitor(itemMon);
   await sleep(400);
   // 効果がすぐ決まるアイテムはここで表示（TARGET / SHUFFLE / CHANGE は映像のあと本人が決める）
   if (e.item === 'time') return infoCut('time', `${whose(e.by)}の考慮時間`, `<div class="bignum">+${e.sec}秒</div>`);

@@ -226,9 +226,17 @@ export class Sound {
     if (!this.ctx || el._snd) return;
     try {
       const src = this.ctx.createMediaElementSource(el);
-      src.connect(this.seBus);
-      el._snd = true;
+      const g = this.ctx.createGain();
+      src.connect(g); g.connect(this.seBus);
+      el._snd = true; el._gain = g;
     } catch (e) { console.warn('media route failed', e); }
+  }
+  /** 動画の音量（フェード用） */
+  mediaVolume(el, v, sec = 0) {
+    if (!this.ctx || !el._gain) { el.volume = v; return; }
+    const g = el._gain.gain, t = this.ctx.currentTime;
+    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
+    if (sec > 0) g.linearRampToValueAtTime(v, t + sec); else g.setValueAtTime(v, t);
   }
   /** 動画再生時：BGMを即停止 → 終わったらフェードで再開 */
   pauseBgm() {
