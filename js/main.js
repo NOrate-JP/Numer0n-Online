@@ -13,6 +13,12 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const setHTML = (el, html) => { if (el && el._h !== html) { el.innerHTML = html; el._h = html; return true; } return false; };
+/** 中身を描き直してもスクロール位置が戻らないようにする */
+function keepScroll(selectors, fn) {
+  const saved = selectors.map((sel) => { const el = document.querySelector(sel); return el ? [sel, el.scrollTop] : null; }).filter(Boolean);
+  fn();
+  for (const [sel, top] of saved) { const el = document.querySelector(sel); if (el) el.scrollTop = top; }
+}
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // -------------------------------------------------------------
@@ -329,7 +335,9 @@ function lobbyMembers() {
   return Object.entries(m.players || {}).map(([u, p]) => ({ u, name: p.name, online: p.online !== false, role: p.role || 'player', seat: p.seat, joinedAt: p.joinedAt || 0, host: m.host === u, cpu: !!p.cpu, level: p.level }));
 }
 
-function renderLobby() {
+const LOBBY_SCROLL = ['#lobby', '.lobby-left', '.lobby-right'];
+function renderLobby() { keepScroll(LOBBY_SCROLL, renderLobbyInner); }
+function renderLobbyInner() {
   const host = isHost();
   const st = app.settings;
   const members = lobbyMembers();
@@ -594,7 +602,9 @@ function enterSetup() {
   renderSetup(true);
 }
 
-function renderSetup(force) {
+const SETUP_SCROLL = ['#setup', '.setup-body', '.setup-items', '.setup-num'];
+function renderSetup(force) { keepScroll(SETUP_SCROLL, () => renderSetupInner(force)); }
+function renderSetupInner(force) {
   const s = app.state; if (!s || s.phase !== 'setup') return;
   const st = s.settings;
   const D = st.digits;
@@ -1496,7 +1506,7 @@ function showResult() {
     <div class="res-nums">
       ${[app.view, app.opp].map((u) => `<div class="rn ${r.winner === u ? 'w' : ''}"><div class="rn-name">${esc(app.names[u])}</div>
         <div class="rn-cards">${(s.final[u] || '?'.repeat(s.settings.digits)).split('').map((d) => cardHTML(d === '?' ? null : d)).join('')}</div>
-        <div class="rn-wins">${s.wins[u] || 0} WIN</div></div>`).join('<div class="rn-vs">VS</div>')}
+        <div class="rn-wins">${s.wins[u] || 0} WIN</div>${numberHistoryHTML(s, u)}</div>`).join('<div class="rn-vs">VS</div>')}
     </div>
     ${s.matchOver && s.settings.winsNeeded > 1 ? `<div class="res-match">MATCH WINNER：${esc(app.names[r.winner])}</div>` : ''}
     <div class="res-btns">
@@ -1527,6 +1537,26 @@ function showResult() {
     }
   }
 }
+/** 防御アイテムで変わった設定ナンバーの履歴 */
+function numberHistoryHTML(s, uid) {
+  const hist = s.finalHist && s.finalHist[uid];
+  if (!hist || hist.length < 2) return '';
+  const D = s.settings.digits;
+  const effs = s.log.filter((e) => e.type === 'effect' && e.by === uid);
+  const parts = [];
+  hist.forEach((num, i) => {
+    if (i > 0) {
+      const e = effs[i - 1];
+      const label = !e ? '' : e.item === 'shuffle' ? (hist[i - 1] === num ? 'SHUFFLE<small>（フェイント）</small>' : 'SHUFFLE') : `CHANGE<small>${R.posLabel(e.pos, D)}</small>`;
+      const col = e ? R.ITEM_DEFS[e.item].color : '#888';
+      parts.push(`<span class="nh-arrow" style="--ic:${col}">${label}<i>▶</i></span>`);
+    }
+    const prev = i > 0 ? hist[i - 1] : null;
+    parts.push(`<span class="nh-num ${i === hist.length - 1 ? 'last' : ''}">${num.split('').map((d, k) => `<i class="${prev && prev[k] !== d ? 'chg' : ''}">${d}</i>`).join('')}</span>`);
+  });
+  return `<div class="rn-hist"><div class="nh-head">番号の変化</div><div class="nh-row">${parts.join('')}</div></div>`;
+}
+
 function hideResult() { const b = $('#result'); if (b) { b.className = ''; b.innerHTML = ''; } const sb = $('#show-result'); if (sb) sb.remove(); }
 function showBoardBtn() {
   if ($('#show-result')) return;

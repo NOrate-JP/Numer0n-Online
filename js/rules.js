@@ -293,7 +293,10 @@ function beginTurn(s, uid, base, isFirst) {
   s.turnNo = (s.turnNo || 0) + 1;
   // 判定表示 → ターン交代 → 防御タイム → コール可能
   s.turnStartAt = isFirst ? base : base + JUDGE_MS;
-  s.cooldownUntil = s.turnStartAt + (isFirst ? 0 : st.cooldownSec * 1000);
+  // 防御側が防御アイテムを持っていなければ防御タイムは省略
+  const defender = other(s, uid);
+  const canGuard = hasUnused(s, defender, 'defense');
+  s.cooldownUntil = s.turnStartAt + (isFirst || !canGuard ? 0 : st.cooldownSec * 1000);
   s.turnDeadline = st.turnSec > 0 ? s.cooldownUntil + st.turnSec * 1000 : 0;
   s.callsLeft = 1;
   s.attackUsed = false;
@@ -503,10 +506,12 @@ export function actResign(s, uid, now) {
   return finishGame(s, other(s, uid), 'resign', now);
 }
 
-export function setFinal(s, uid, num) {
+export function setFinal(s, uid, num, hist) {
   s = norm(s);
   if (!s || s.phase !== 'gameover' || s.final[uid]) return undefined;
   s.final[uid] = num;
+  // 防御アイテムで変わった番号の履歴（最初の番号 → … → 最後）
+  if (Array.isArray(hist) && hist.length > 1) { s.finalHist = s.finalHist || {}; s.finalHist[uid] = hist.slice(0, 8); }
   return s;
 }
 
@@ -523,7 +528,7 @@ export function actNext(s, uid, now) {
     s.phase = 'setup';
     s.setup = {}; s.log = []; s.nextReady = {}; s.pending = null;
     s.result = null; s.order = null; s.finalChance = null; s.matchOver = false;
-    s.items = {}; s.reveals = {}; s.final = {}; s.secretVer = {};
+    s.items = {}; s.reveals = {}; s.final = {}; s.secretVer = {}; s.finalHist = null;
   }
   return norm(s);
 }

@@ -124,7 +124,10 @@ export class Player {
     const sec = this.secret;
     if (!sec) return;
     this._finalSent = key;
-    this.store.update((cur) => R.setFinal(cur, this.uid, sec));
+    const cur = (s.secretVer && s.secretVer[this.uid]) || 0;
+    const hist = [];
+    for (let v = 0; v <= cur; v++) if (this.secrets[v] != null) hist.push(this.secrets[v]);
+    this.store.update((st) => R.setFinal(st, this.uid, sec, hist));
   }
 
   // ---------------- actions ----------------
